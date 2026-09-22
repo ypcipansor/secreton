@@ -103,7 +103,8 @@ dibaca. Konversi ke dan dari plaintext hanya terjadi di dalam barrier kriptograf
 | `permissions` | `Vec<String>` | Permission eksplisit |
 | `policies` | `Vec<String>` | Policy yang melekat |
 | `metadata` | `HashMap<String, String>` | Metadata |
-| `password_hash` | `String` | Hash Argon2id |
+| `password_hash` | `String` | Hash Argon2id; kosong untuk bootstrap root |
+| `password_login_disabled` | `bool` | `true` hanya untuk bootstrap root (default `false` untuk record lama) |
 | `mfa_enabled` | `bool` | Status MFA |
 | `mfa_secret` | `Option<String>` | Rahasia TOTP |
 | `disabled`, `enabled`, `is_active` | `bool` | Flag status |
@@ -132,6 +133,27 @@ manual — shares tidak pernah diterima operator pada percobaan yang gagal, jadi
 setengah jadi tidak boleh terlihat permanen. Marker tidak menyimpan share, token, password,
 JWT secret, atau root key; ia hanya mencatat nama akun root dan id entitas untuk menemukan
 record TOTP yang perlu dibersihkan.
+
+Marker dihapus paling akhir dan hanya jika seluruh artefak wajib benar-benar terhapus.
+Selama satu delete gagal, marker tetap ada dan `init` mengembalikan error, sehingga percobaan
+berikutnya mengulang pembersihan yang sama. Path yang tidak ada dihitung sukses (idempoten);
+vault yang sudah committed tidak pernah dihapus artefaknya. Penulisan marker memakai operasi
+upsert, bukan insert, karena `init` menulisnya beberapa kali: PostgreSQL menolak insert kedua
+ke `path` yang sama pada constraint `UNIQUE`, sedangkan backend memory menerimanya.
+
+Inisialisasi diserialkan dalam satu proses oleh sebuah async mutex yang dipegang untuk
+seluruh urutan (recovery, guard `is_initialized`, staging, penulisan, commit, penghapusan
+marker, dan cleanup). Dua pemanggilan `init` yang bersamaan karenanya menghasilkan tepat satu
+pemenang; pemanggilan lainnya ditolak dengan aman. Batas ini berlaku per proses — untuk
+backend yang dipakai bersama, dua proses berbeda tidak diserialkan oleh trait storage saat ini
+dan masing-masing harus melakukan inisialisasi secara terkoordinasi.
+
+Vault yang dibuat sebelum `sys/root_identity` ada tetap dapat dipakai. Setelah barrier
+terbuka, jika tidak ada record identitas, `unseal` mencari akun legacy bernama `root`,
+memverifikasi bahwa akun itu benar-benar ada dan privileged, menandainya
+non-password-authenticatable, lalu mem-persist identitas tersebut agar permintaan berikutnya
+tidak bergantung pada fallback. Record identitas yang corrupt atau error storage dilaporkan
+sebagai error dan tidak pernah berubah menjadi fallback ke akun lain.
 
 Lockout: setelah 5 percobaan gagal, akun non-privileged dikunci selama 15 menit
 (`crates/engines/src/services/auth.rs`). Akun privileged sengaja tidak dikunci dengan cara

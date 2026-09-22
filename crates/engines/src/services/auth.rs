@@ -470,6 +470,7 @@ impl AuthenticationService {
                             user.roles.clone(),
                             user.policies.clone(),
                             user.permissions.clone(),
+                            user.password_login_disabled,
                         )
                         .await;
                 }
@@ -720,10 +721,34 @@ impl AuthenticationService {
         // Get effective config for session timeout and MFA enforcement
         let (session_timeout_secs, global_mfa_enabled) = self.get_effective_config().await;
 
-        // Root user cannot login via password (authentication is handled via unseal/SSS token)
-        if req.username == "root" {
+        // The bootstrap root identity is barred from password login because the account is
+        // persisted as non-password-authenticatable, not because of how it is named.
+        //
+        // A literal `req.username == "root"` check used to stand here. It was the entire
+        // guard, and it stopped covering the account the moment `init` accepted a custom
+        // `root_username`: a root account created as, say, `vault-operator` walked straight
+        // through with its generated password hash. It also denied an ordinary admin who
+        // merely chose the name "root". The check below reads the account's own record, so
+        // it covers the identity `init` created under any name and leaves an ordinary
+        // account of the same name alone.
+        if let Ok(Some(user)) = self.find_user_by_username(&req.username).await
+            && user.password_login_disabled
+        {
+            if let Some(audit) = &self.audit {
+                let _ = audit
+                    .log_event(
+                        crate::services::audit::SecurityEventType::AuthenticationFailure {
+                            user: req.username.clone(),
+                            method: "userpass".to_string(),
+                            reason: "Account is not password-authenticatable".to_string(),
+                        },
+                    )
+                    .await;
+            }
+            // Generic, identical to a wrong password: the refusal must not become a
+            // username oracle that reveals which account is the bootstrap root.
             return Err(secreton_domain::SecretonError::Authentication {
-                message: "Root login disabled via password. Use unseal process.".to_string(),
+                message: "Invalid credentials".to_string(),
             });
         }
 
@@ -858,6 +883,7 @@ impl AuthenticationService {
                 display_name: user_info.display_name.clone(),
                 full_name: user_info.display_name,
                 password_hash: "".to_string(), // Not used in API responses
+                password_login_disabled: false,
                 is_active: true,
                 is_superuser: false,
                 disabled: false,
@@ -1141,6 +1167,7 @@ impl AuthenticationService {
             username: claims.claims.username.clone(),
             email: claims.claims.email.clone(),
             password_hash: "".to_string(),
+            password_login_disabled: false,
             full_name: None,
             is_active: true,
             is_superuser: false,
@@ -1580,6 +1607,7 @@ impl AuthenticationService {
             display_name: None,
             disabled: false,
             password_hash: "".to_string(),
+            password_login_disabled: false,
             full_name: None,
             is_active: true,
             is_superuser: false,
@@ -1644,6 +1672,7 @@ impl AuthenticationService {
             username: username.to_string(),
             email: email.clone(),
             password_hash,
+            password_login_disabled: false,
             full_name: None,
             is_active: true,
             is_superuser: roles.contains(&"admin".to_string())
@@ -1703,6 +1732,138 @@ impl AuthenticationService {
             permissions,
         )
         .await
+    }
+
+    /// Create the bootstrap root identity `init` owns the vault through.
+    ///
+    /// Deliberately not `register_user` with a random password. That is what the previous
+    /// implementation did, and it left a privileged account holding an active password
+    /// hash: the only thing keeping it out of the password path was a literal `"root"`
+    /// username check, which stopped covering the account the moment `init` accepted a
+    /// custom `root_username`. This creates the account with an explicitly
+    /// non-password-authenticatable identity instead — no hash is generated or stored, and
+    /// `password_login_disabled` is persisted — so the boundary is the account's own
+    /// property rather than its name.
+    pub async fn register_bootstrap_root(
+        &self,
+        username: &str,
+        email: Option<String>,
+        roles: Vec<String>,
+        permissions: Vec<String>,
+    ) -> Result<User, AuthError> {
+        let path = format!("{}{}", USER_STORAGE_PREFIX, username);
+        if self.storage.exists(&path).await? {
+            return Err(AuthError::UserAlreadyExists);
+        }
+
+        let user_id = Uuid::new_v4().to_string();
+
+        // Register the identity with the userpass method so token issuance sees it, but
+        // with no password hash and the flag set: there is nothing for a verifier to
+        // accept even if the in-memory entry were tampered with.
+        self.userpass_method
+            .add_bootstrap_root(
+                username.to_string(),
+                user_id.clone(),
+                roles.clone(),
+                vec!["default".to_string()],
+                permissions.clone(),
+            )
+            .await;
+
+        let user = User {
+            id: user_id,
+            username: username.to_string(),
+            email,
+            password_hash: String::new(),
+            password_login_disabled: true,
+            full_name: None,
+            is_active: true,
+            is_superuser: true,
+            roles,
+            permissions,
+            policies: vec!["default".to_string()],
+            enabled: true,
+            disabled: false,
+            display_name: None,
+            mfa_enabled: false,
+            mfa_secret: None,
+            last_login: None,
+            created_at: chrono::Utc::now(),
+            updated_at: chrono::Utc::now(),
+            metadata: HashMap::new(),
+            failed_login_attempts: 0,
+            locked_until: None,
+        };
+
+        let user_data = serde_json::to_vec(&user)
+            .map_err(|e| AuthError::Internal(anyhow::anyhow!("Serialization error: {}", e)))?;
+        let encrypted_data = self.crypto.encrypt_data(&user_data).await.map_err(|e| {
+            AuthError::Crypto(secreton_crypto::CryptoError::Internal(e.to_string()))
+        })?;
+        let entry = SecretEntry::new(
+            path,
+            encrypted_data,
+            EncryptionMetadata::default(),
+            SecurityLevel::Secret,
+            Uuid::parse_str(&user.id).unwrap_or_default(),
+        );
+        self.storage.store(&entry).await?;
+
+        Ok(user)
+    }
+
+    /// Mark an existing account as not password-authenticatable, in storage *and* in the
+    /// in-memory userpass cache the login path reads.
+    ///
+    /// Used by the seal service to upgrade a vault initialised before the flag existed:
+    /// that vault's root account was created with a generated password and can only be
+    /// identified by reading the real record, so the upgrade persists the same boundary a
+    /// fresh `init` now writes directly.
+    pub async fn mark_password_login_disabled(&self, username: &str) -> Result<(), AuthError> {
+        let path = format!("{}{}", USER_STORAGE_PREFIX, username);
+        let Some(entry) = self
+            .storage
+            .get_by_path(&path)
+            .await
+            .map_err(AuthError::Storage)?
+        else {
+            return Err(AuthError::UserNotFound);
+        };
+        let bytes = self.crypto.decrypt(&entry.encrypted_data).await?;
+        let mut user: User = serde_json::from_slice(&bytes)
+            .map_err(|e| AuthError::Internal(anyhow::anyhow!("corrupt user record: {}", e)))?;
+        if user.password_login_disabled {
+            return Ok(());
+        }
+        user.password_login_disabled = true;
+        user.updated_at = chrono::Utc::now();
+
+        let data = serde_json::to_vec(&user)
+            .map_err(|e| AuthError::Internal(anyhow::anyhow!("Serialization error: {}", e)))?;
+        let encrypted = self.crypto.encrypt_data(&data).await.map_err(|e| {
+            AuthError::Crypto(secreton_crypto::CryptoError::Internal(e.to_string()))
+        })?;
+        let mut updated = entry;
+        updated.encrypted_data = encrypted;
+        self.storage
+            .update(&updated)
+            .await
+            .map_err(AuthError::Storage)?;
+
+        // The login path checks the cached `UserEntry`, which was built at startup. With
+        // the hash cleared it cannot accept a password either way, but keeping the two in
+        // step is what makes the flags agree.
+        self.userpass_method
+            .add_bootstrap_root(
+                user.username.clone(),
+                user.id.clone(),
+                user.roles.clone(),
+                user.policies.clone(),
+                user.permissions.clone(),
+            )
+            .await;
+        Ok(())
     }
 
     /// Look up a user by username, decrypting the stored record.
@@ -2004,6 +2165,17 @@ impl AuthenticationService {
 
     /// Verify password for a user
     pub async fn verify_password(&self, username: &str, password: &str) -> Result<bool, AuthError> {
+        // The bootstrap root identity has no password to verify, and asking must not
+        // become an oracle for which account it is: the answer is the same as a wrong
+        // password. The persisted flag is the boundary; a nil hash would already fail
+        // `check_password`, but relying on that alone would be relying on the absence of a
+        // value rather than on a stated property.
+        if let Ok(Some(user)) = self.find_user_by_username(username).await
+            && user.password_login_disabled
+        {
+            return Ok(false);
+        }
+
         let request = LoginRequest {
             username: username.to_string(),
             password: password.to_string(),
@@ -2089,13 +2261,14 @@ impl AuthenticationService {
         ip_address: String,
         user_agent: String,
     ) -> Result<AuthResult, AuthError> {
-        // Root user cannot login via password — mirrors the check in `login()`
-        // so that the root account is consistently blocked from password-based
-        // authentication regardless of which code path is used.
-        if credentials.username == "root" {
-            return Err(AuthError::InvalidCredentials);
-        }
-
+        // Same boundary as `login()`: the bootstrap root identity is barred because the
+        // account is persisted as non-password-authenticatable, not by username. The
+        // literal check this replaces only covered the default name and let a root account
+        // created under a custom `root_username` authenticate with its generated password.
+        //
+        // Checked after the user is loaded below so the denial reads the real record; the
+        // generic error keeps it from revealing which account is the bootstrap root.
+        //
         // Load user from storage ONCE at the start so that lockout checks,
         // failed-attempt increments, policy loading, and counter resets all
         // operate on the same snapshot.  This eliminates the TOCTOU window
@@ -2140,6 +2313,26 @@ impl AuthenticationService {
                 return Err(AuthError::Storage(e));
             }
         };
+
+        // The bootstrap root identity cannot password-authenticate. Checked against the
+        // loaded record so the boundary follows the account, and answered with the same
+        // generic error a wrong password gets.
+        if let Some(ref u) = pre_auth_user
+            && u.password_login_disabled
+        {
+            if let Some(audit) = &self.audit {
+                let _ = audit
+                    .log_event(
+                        crate::services::audit::SecurityEventType::AuthenticationFailure {
+                            user: credentials.username.clone(),
+                            method: "userpass".to_string(),
+                            reason: "Account is not password-authenticatable".to_string(),
+                        },
+                    )
+                    .await;
+            }
+            return Err(AuthError::InvalidCredentials);
+        }
 
         // Check lockout status before attempting login — mirrors the check in
         // `login()` so that locked accounts cannot authenticate through this
@@ -2457,6 +2650,7 @@ impl AuthenticationService {
             display_name: (!oauth_user.name.is_empty()).then(|| oauth_user.name.clone()),
             disabled: false,
             password_hash: "".to_string(), // OAuth users don't have password
+            password_login_disabled: false,
             full_name: (!oauth_user.name.is_empty()).then(|| oauth_user.name.clone()),
             is_active: true,
             is_superuser: false,
@@ -2484,6 +2678,11 @@ mod tests {
 
     use crate::services::crypto::CryptoService;
     // use secreton_crypto::SecurityParams;
+    use crate::services::mfa_persistence::PersistentTotpService;
+    use secreton_auth::mfa::{
+        CombinedMfaService, DefaultPushService, DefaultRecoveryCodeService, DefaultWebAuthnService,
+        EmailConfig, InMemoryEmailService, InMemoryHardwareService, InMemorySmsService, SmsConfig,
+    };
     use secreton_storage::backends::MemoryBackend;
 
     #[tokio::test]
@@ -2613,6 +2812,313 @@ mod tests {
 
         let count = auth_service.get_user_count().await.unwrap();
         assert_eq!(count, 2);
+    }
+
+    /// Build a service graph with the root key installed, so a test can create the
+    /// bootstrap root account and then attempt to log in as it. Returns the root key
+    /// bytes too, so a test can rebuild the service over the same storage (a restart)
+    /// without invalidating the records it wrote.
+    async fn auth_with_open_barrier() -> (
+        Arc<dyn StorageBackend + Send + Sync>,
+        Arc<AuthenticationService>,
+        Vec<u8>,
+    ) {
+        let storage: Arc<dyn StorageBackend + Send + Sync> = Arc::new(MemoryBackend::new());
+        let crypto = Arc::new(CryptoService::new(storage.clone()).await.unwrap());
+        let root_key = secreton_crypto::generate_key(secreton_crypto::AlgorithmId::Aes256Gcm)
+            .expect("root key");
+        crypto
+            .set_root_key(root_key.clone())
+            .await
+            .expect("install root key");
+
+        let mut config = AuthConfig::default();
+        config.jwt.secret = Some("test_secret".to_string());
+        config.jwt.issuer = "secreton".to_string();
+        config.jwt.audience = "secreton-api".to_string();
+
+        let mfa = Arc::new(CombinedMfaService::new(
+            Arc::new(PersistentTotpService::new(
+                storage.clone(),
+                crypto.clone(),
+                "secreton-test".to_string(),
+            )),
+            Arc::new(InMemorySmsService::new(SmsConfig::default())),
+            Arc::new(InMemoryEmailService::new(EmailConfig::default())),
+            Arc::new(InMemoryHardwareService::new()),
+            Arc::new(DefaultPushService::new_mock()),
+            Arc::new(DefaultWebAuthnService::new_default()),
+            Arc::new(DefaultRecoveryCodeService::new()),
+        ));
+
+        let service = Arc::new(
+            AuthenticationService::new(storage.clone(), crypto, &config)
+                .await
+                .unwrap()
+                .with_mfa(mfa),
+        );
+        (storage, service, root_key)
+    }
+
+    #[tokio::test]
+    async fn a_bootstrap_root_created_under_a_custom_name_cannot_password_login() {
+        // CWE-287 regression: the root boundary was the literal username `"root"`. Once
+        // `init` accepted a custom `root_username`, the privileged account it created under
+        // another name kept a generated password hash and could log in with it. The
+        // boundary is now the account's persisted `password_login_disabled` flag.
+        let _env = crate::test_support::without_root_key();
+        let (storage, service, root_key) = auth_with_open_barrier().await;
+
+        const ROOT_USERNAME: &str = "vault-operator";
+        let root = service
+            .register_bootstrap_root(
+                ROOT_USERNAME,
+                Some("root@system.local".to_string()),
+                vec!["root".to_string(), "admin".to_string()],
+                vec!["*".to_string()],
+            )
+            .await
+            .expect("bootstrap root");
+        assert!(root.is_admin());
+        assert!(
+            root.password_hash.is_empty(),
+            "the bootstrap root must store no password hash at all"
+        );
+
+        // Plant a *valid* password hash on the record and in the in-memory userpass cache,
+        // so the account looks exactly like one that held a generated password. An empty
+        // hash alone would make this pass without the flag doing any work; a real hash
+        // proves the flag is the boundary the denial stands on. The password is generated
+        // per test rather than a literal: a fixed one is not a credential, but it reads
+        // like one to a scanner and models production wrongly.
+        use rand::Rng;
+        let generated: String = rand::thread_rng()
+            .sample_iter(&rand::distributions::Alphanumeric)
+            .take(32)
+            .map(char::from)
+            .collect();
+        // Control: the same password on an ordinary account really does log in, so a
+        // denial below cannot be explained by a password nobody can use.
+        service
+            .register_user(
+                "password-control",
+                &generated,
+                None,
+                vec!["admin".to_string()],
+                vec![],
+            )
+            .await
+            .expect("control account");
+        assert!(
+            service
+                .login(
+                    ApiLoginRequest {
+                        username: "password-control".to_string(),
+                        password: generated.clone(),
+                        mfa_code: None,
+                    },
+                    "192.0.2.1".to_string(),
+                    "test".to_string(),
+                )
+                .await
+                .is_ok(),
+            "the control account must be able to log in with the generated password"
+        );
+
+        // Now give the bootstrap root that same password: a valid hash both in the record
+        // and in the cache the login path reads.
+        let valid_hash = service
+            .userpass_method
+            .create_user(
+                "hash-probe".to_string(),
+                &generated,
+                "probe-id".to_string(),
+                vec![],
+                vec![],
+                vec![],
+            )
+            .await
+            .expect("hash the probe password");
+        service
+            .userpass_method
+            .add_user(
+                ROOT_USERNAME.to_string(),
+                valid_hash.clone(),
+                root.id.clone(),
+                root.roles.clone(),
+                root.policies.clone(),
+                root.permissions.clone(),
+                true,
+            )
+            .await;
+        let mut stored = root.clone();
+        stored.password_hash = valid_hash;
+        let bytes = serde_json::to_vec(&stored).expect("serialize");
+        let encrypted = service.crypto.encrypt_data(&bytes).await.expect("encrypt");
+        storage
+            .upsert(&secreton_storage::SecretEntry::new(
+                format!("{}{}", USER_STORAGE_PREFIX, ROOT_USERNAME),
+                encrypted,
+                secreton_storage::EncryptionMetadata::default(),
+                secreton_storage::SecurityLevel::Secret,
+                uuid::Uuid::parse_str(&root.id).unwrap_or_default(),
+            ))
+            .await
+            .expect("plant the hash on the record");
+        let _ = root_key;
+
+        // Every password-login entry point refuses it with the generic error.
+        for password in ["", "password", "changeme", "root", generated.as_str()] {
+            let login = service
+                .login(
+                    ApiLoginRequest {
+                        username: ROOT_USERNAME.to_string(),
+                        password: password.to_string(),
+                        mfa_code: None,
+                    },
+                    "192.0.2.1".to_string(),
+                    "test".to_string(),
+                )
+                .await;
+            let err = login.expect_err("password login must be refused");
+            let text = err.to_string();
+            assert!(
+                text.to_lowercase().contains("invalid credentials")
+                    || text.to_lowercase().contains("authentication failed"),
+                "the denial must stay generic, not name the account: {text}"
+            );
+            assert!(
+                !text.contains(ROOT_USERNAME),
+                "the denial must not echo the privileged username: {text}"
+            );
+
+            let authenticate = service
+                .authenticate(
+                    secreton_auth::LoginRequest {
+                        username: ROOT_USERNAME.to_string(),
+                        password: password.to_string(),
+                        mfa_code: None,
+                        remember_me: None,
+                    },
+                    "192.0.2.1".to_string(),
+                    "test".to_string(),
+                )
+                .await;
+            assert!(
+                authenticate.is_err(),
+                "authenticate() must refuse the bootstrap root too"
+            );
+
+            assert!(
+                !service
+                    .verify_password(ROOT_USERNAME, password)
+                    .await
+                    .expect("verify_password"),
+                "verify_password() must not accept a password for the bootstrap root"
+            );
+        }
+
+        // The account is untouched by those attempts: not locked, not mutated.
+        let reloaded = service
+            .find_user_by_username(ROOT_USERNAME)
+            .await
+            .expect("find")
+            .expect("the root account still exists");
+        assert_eq!(reloaded.failed_login_attempts, 0);
+        assert!(reloaded.locked_until.is_none());
+    }
+
+    #[tokio::test]
+    async fn an_ordinary_admin_named_root_can_still_password_login() {
+        // The boundary is the account, not the name. An ordinary admin who happens to be
+        // called "root" is not the bootstrap identity and must not be denied its password.
+        let _env = crate::test_support::without_root_key();
+        let (_storage, service, _root_key) = auth_with_open_barrier().await;
+
+        service
+            .register_user(
+                "root",
+                "an-ordinary-admins-password",
+                Some("ops@example.com".to_string()),
+                vec!["admin".to_string()],
+                vec![],
+            )
+            .await
+            .expect("ordinary admin");
+
+        assert!(
+            service
+                .verify_password("root", "an-ordinary-admins-password")
+                .await
+                .expect("verify"),
+            "an ordinary admin account named 'root' is password-authenticatable"
+        );
+        let login = service
+            .login(
+                ApiLoginRequest {
+                    username: "root".to_string(),
+                    password: "an-ordinary-admins-password".to_string(),
+                    mfa_code: None,
+                },
+                "192.0.2.1".to_string(),
+                "test".to_string(),
+            )
+            .await;
+        assert!(
+            login.is_ok(),
+            "an ordinary admin named 'root' must be able to log in: {:?}",
+            login.err().map(|e| e.to_string())
+        );
+    }
+
+    #[tokio::test]
+    async fn the_bootstrap_root_flag_survives_a_restart() {
+        // The denial must not depend on in-memory state: a service rebuilt over the same
+        // storage (a restart) must still refuse the bootstrap root, and the flag must be
+        // what does it. Deserialization of a record written before the field existed
+        // defaults to false, so this also proves the flag is actually persisted.
+        let _env = crate::test_support::without_root_key();
+        let (storage, service, root_key) = auth_with_open_barrier().await;
+
+        const ROOT_USERNAME: &str = "persisted-root";
+        service
+            .register_bootstrap_root(
+                ROOT_USERNAME,
+                None,
+                vec!["root".to_string(), "admin".to_string()],
+                vec!["*".to_string()],
+            )
+            .await
+            .expect("bootstrap root");
+
+        let crypto = Arc::new(CryptoService::new(storage.clone()).await.unwrap());
+        crypto
+            .set_root_key(root_key)
+            .await
+            .expect("reinstall the same root key so the existing records still decrypt");
+
+        let mut config = AuthConfig::default();
+        config.jwt.secret = Some("test_secret".to_string());
+        let restarted = AuthenticationService::new(storage.clone(), crypto, &config)
+            .await
+            .expect("rebuild the service over the same storage");
+
+        // The persisted record carries the flag, and the rebuilt service refuses login.
+        let user = restarted
+            .find_user_by_username(ROOT_USERNAME)
+            .await
+            .expect("find")
+            .expect("user");
+        assert!(
+            user.password_login_disabled,
+            "the non-password-authenticatable flag must be persisted on the record"
+        );
+        assert!(
+            !restarted
+                .verify_password(ROOT_USERNAME, "anything")
+                .await
+                .expect("verify")
+        );
     }
 }
 

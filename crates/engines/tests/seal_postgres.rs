@@ -1,0 +1,270 @@
+//! Full initialization against a real PostgreSQL backend.
+//!
+//! The unit tests use the in-memory backend, whose `store` silently overwrites a path.
+//! PostgreSQL declares `path VARCHAR NOT NULL UNIQUE`, so a second insert at the same path
+//! is a constraint violation. That difference is exactly what made initialization fail on
+//! PostgreSQL while every memory-backed test passed: the staging marker is written several
+//! times. The unit suite reproduces the constraint with `UniquePathStore`; this test proves
+//! it against the real thing.
+//!
+//! Set `SECRETON_TEST_POSTGRES_URL` to run it:
+//!
+//! ```text
+//! docker run --rm -d -p 5432:5432 -e POSTGRES_PASSWORD=postgres postgres:17
+//! SECRETON_TEST_POSTGRES_URL=postgres://postgres:postgres@localhost:5432/postgres \
+//!     cargo test -p secreton-engines --features postgres --test seal_postgres
+//! ```
+//!
+//! Without the variable the test returns early, like the other database integration tests.
+
+use std::sync::Arc;
+
+use secreton_engines::config::AuthConfig;
+use secreton_engines::services::audit::AuditLogger;
+use secreton_engines::services::auth::AuthenticationService;
+use secreton_engines::services::crypto::CryptoService;
+use secreton_engines::services::mfa_persistence::PersistentTotpService;
+use secreton_engines::services::seal::SealService;
+use secreton_storage::{StorageBackend, backends::PostgresBackend};
+
+fn database_url() -> Option<String> {
+    match std::env::var("SECRETON_TEST_POSTGRES_URL") {
+        Ok(url) if !url.trim().is_empty() => Some(url),
+        _ => {
+            eprintln!("skipping: SECRETON_TEST_POSTGRES_URL is not set");
+            None
+        }
+    }
+}
+
+#[tokio::test]
+async fn initialization_completes_on_a_unique_path_backend() {
+    let Some(url) = database_url() else {
+        return;
+    };
+
+    let backend = PostgresBackend::new(&url).await.expect("connect");
+    backend.migrate().await.expect("migrate");
+
+    // A dedicated path namespace per run, so a previous run's rows cannot make this pass
+    // or fail for the wrong reason and this test cannot collide with another.
+    let namespace = format!("it/{}", uuid::Uuid::new_v4());
+    let storage: Arc<dyn StorageBackend + Send + Sync> = Arc::new(NamespacedBackend {
+        inner: backend,
+        prefix: namespace,
+    });
+
+    let crypto = Arc::new(CryptoService::new(storage.clone()).await.expect("crypto"));
+    let mut config = AuthConfig::default();
+    config.jwt.secret = Some("integration-test-secret-1234567890".to_string());
+    let auth = Arc::new(
+        AuthenticationService::new(storage.clone(), crypto.clone(), &config)
+            .await
+            .expect("auth"),
+    );
+    let audit = Arc::new(
+        AuditLogger::new(storage.clone(), 2555, 100, true)
+            .await
+            .expect("audit"),
+    );
+    let seal = Arc::new(SealService::new(storage.clone(), crypto.clone()))
+        .with_auth(auth.clone())
+        .with_audit(audit.clone());
+    let mfa = mfa_service(storage.clone(), crypto.clone()).await;
+
+    let init = seal
+        .init(3, 2, "pg-root", &auth, &mfa)
+        .await
+        .expect("initialization must survive a UNIQUE(path) backend");
+
+    // The shares open the vault and issue a credential for the named account.
+    let partial = seal.unseal(&init.keys[0]).await.expect("share one");
+    assert!(partial.sealed);
+    let complete = seal.unseal(&init.keys[1]).await.expect("share two");
+    assert!(!complete.sealed);
+    let token = complete
+        .root_token
+        .expect("a completed initialization must issue a bootstrap credential");
+    let user = auth.validate_token(&token).await.expect("token validates");
+    assert_eq!(user.username, "pg-root");
+
+    // The marker is gone: the repeated writes and its removal all worked on PostgreSQL.
+    assert!(
+        storage
+            .get_by_path("sys/init_staging")
+            .await
+            .expect("storage")
+            .is_none(),
+        "a completed initialization must clear its staging marker"
+    );
+    assert!(seal.is_initialized().await);
+}
+
+/// The MFA service the engine graph expects, built from the public MFA types.
+async fn mfa_service(
+    storage: Arc<dyn StorageBackend + Send + Sync>,
+    crypto: Arc<CryptoService>,
+) -> Arc<secreton_auth::mfa::CombinedMfaService> {
+    use secreton_auth::mfa::{
+        CombinedMfaService, DefaultPushService, DefaultRecoveryCodeService, DefaultWebAuthnService,
+        EmailConfig, InMemoryEmailService, InMemoryHardwareService, InMemorySmsService, SmsConfig,
+    };
+
+    Arc::new(CombinedMfaService::new(
+        Arc::new(PersistentTotpService::new(
+            storage,
+            crypto,
+            "secreton-test".to_string(),
+        )),
+        Arc::new(InMemorySmsService::new(SmsConfig::default())),
+        Arc::new(InMemoryEmailService::new(EmailConfig::default())),
+        Arc::new(InMemoryHardwareService::new()),
+        Arc::new(DefaultPushService::new_mock()),
+        Arc::new(DefaultWebAuthnService::new_default()),
+        Arc::new(DefaultRecoveryCodeService::new()),
+    ))
+}
+
+/// Prefix every path so one run owns an isolated namespace in a shared database. The
+/// service under test is path-keyed throughout, so re-scoping on the way in and out is all
+/// that is needed; the entry bodies are opaque to this wrapper.
+#[derive(Debug)]
+struct NamespacedBackend {
+    inner: PostgresBackend,
+    prefix: String,
+}
+
+impl NamespacedBackend {
+    fn scope(&self, path: &str) -> String {
+        format!("{}/{}", self.prefix, path)
+    }
+}
+
+#[async_trait::async_trait]
+impl StorageBackend for NamespacedBackend {
+    async fn store(
+        &self,
+        entry: &secreton_storage::SecretEntry,
+    ) -> secreton_storage::StorageResult<()> {
+        let mut scoped = entry.clone();
+        scoped.path = self.scope(&entry.path);
+        self.inner.store(&scoped).await
+    }
+
+    async fn get_by_id(
+        &self,
+        id: uuid::Uuid,
+    ) -> secreton_storage::StorageResult<Option<secreton_storage::SecretEntry>> {
+        self.inner.get_by_id(id).await
+    }
+
+    async fn get_by_path(
+        &self,
+        path: &str,
+    ) -> secreton_storage::StorageResult<Option<secreton_storage::SecretEntry>> {
+        self.inner.get_by_path(&self.scope(path)).await
+    }
+
+    async fn update(
+        &self,
+        entry: &secreton_storage::SecretEntry,
+    ) -> secreton_storage::StorageResult<()> {
+        let mut scoped = entry.clone();
+        scoped.path = self.scope(&entry.path);
+        self.inner.update(&scoped).await
+    }
+
+    async fn upsert(
+        &self,
+        entry: &secreton_storage::SecretEntry,
+    ) -> secreton_storage::StorageResult<()> {
+        let mut scoped = entry.clone();
+        scoped.path = self.scope(&entry.path);
+        self.inner.upsert(&scoped).await
+    }
+
+    async fn delete_by_id(&self, id: uuid::Uuid) -> secreton_storage::StorageResult<bool> {
+        self.inner.delete_by_id(id).await
+    }
+
+    async fn delete_by_path(&self, path: &str) -> secreton_storage::StorageResult<bool> {
+        self.inner.delete_by_path(&self.scope(path)).await
+    }
+
+    async fn list(
+        &self,
+        params: &secreton_storage::QueryParams,
+    ) -> secreton_storage::StorageResult<Vec<secreton_storage::SecretEntry>> {
+        let mut scoped = params.clone();
+        scoped.path_prefix = Some(self.scope(params.path_prefix.as_deref().unwrap_or("")));
+        self.inner.list(&scoped).await
+    }
+
+    async fn count(
+        &self,
+        params: &secreton_storage::QueryParams,
+    ) -> secreton_storage::StorageResult<u64> {
+        let mut scoped = params.clone();
+        scoped.path_prefix = Some(self.scope(params.path_prefix.as_deref().unwrap_or("")));
+        self.inner.count(&scoped).await
+    }
+
+    async fn exists(&self, path: &str) -> secreton_storage::StorageResult<bool> {
+        self.inner.exists(&self.scope(path)).await
+    }
+
+    async fn begin_transaction(
+        &self,
+    ) -> secreton_storage::StorageResult<Box<dyn secreton_storage::StorageTransaction>> {
+        self.inner.begin_transaction().await
+    }
+
+    async fn health_check(
+        &self,
+    ) -> secreton_storage::StorageResult<secreton_storage::HealthStatus> {
+        self.inner.health_check().await
+    }
+
+    async fn get_stats(&self) -> secreton_storage::StorageResult<secreton_storage::StorageStats> {
+        self.inner.get_stats().await
+    }
+
+    async fn migrate(&self) -> secreton_storage::StorageResult<()> {
+        self.inner.migrate().await
+    }
+
+    async fn compact(&self) -> secreton_storage::StorageResult<()> {
+        self.inner.compact().await
+    }
+
+    async fn vacuum(&self) -> secreton_storage::StorageResult<()> {
+        self.inner.vacuum().await
+    }
+
+    async fn delete_expired(
+        &self,
+        path_prefix: Option<String>,
+    ) -> secreton_storage::StorageResult<u64> {
+        self.inner
+            .delete_expired(path_prefix.map(|p| self.scope(&p)))
+            .await
+    }
+
+    async fn store_oauth_state(
+        &self,
+        state: &secreton_domain::OAuthState,
+    ) -> secreton_storage::StorageResult<()> {
+        self.inner.store_oauth_state(state).await
+    }
+
+    async fn get_oauth_state(
+        &self,
+        state: &str,
+    ) -> secreton_storage::StorageResult<Option<secreton_domain::OAuthState>> {
+        self.inner.get_oauth_state(state).await
+    }
+
+    async fn delete_expired_oauth_states(&self) -> secreton_storage::StorageResult<u64> {
+        self.inner.delete_expired_oauth_states().await
+    }
+}

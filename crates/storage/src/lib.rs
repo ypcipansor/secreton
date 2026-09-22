@@ -317,6 +317,33 @@ pub trait StorageBackend: std::fmt::Debug + Send + Sync {
     /// Update an existing secreton entry
     async fn update(&self, entry: &SecretEntry) -> StorageResult<()>;
 
+    /// Store an entry, replacing any existing entry at the same path.
+    ///
+    /// `store` is an insert: the backends disagree about what a second write to the same
+    /// path does. In-memory and the file backend overwrite silently; PostgreSQL has a
+    /// `UNIQUE(path)` constraint and the insert fails, and Raft's replicated store would
+    /// likewise create a second record for one path. A caller that can write the same path
+    /// twice — such as initialization recording its progress — therefore cannot use
+    /// `store` portably.
+    ///
+    /// This is the portable replacement, expressed only in terms of the two operations
+    /// every backend implements: it looks the path up, and either `update`s the entry that
+    /// is already there (keeping its id and creation time so `update`, which is keyed by
+    /// id on PostgreSQL and by path on the others, targets the same record) or `store`s a
+    /// new one. It is a read-then-write and so not atomic; the trait offers no
+    /// compare-and-swap, and the seal service serializes its own writes on top of it.
+    async fn upsert(&self, entry: &SecretEntry) -> StorageResult<()> {
+        match self.get_by_path(&entry.path).await? {
+            Some(existing) => {
+                let mut updated = entry.clone();
+                updated.id = existing.id;
+                updated.created_at = existing.created_at;
+                self.update(&updated).await
+            }
+            None => self.store(entry).await,
+        }
+    }
+
     /// Delete a secreton entry by ID
     async fn delete_by_id(&self, id: Uuid) -> StorageResult<bool>;
 
