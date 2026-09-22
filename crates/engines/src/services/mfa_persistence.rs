@@ -19,7 +19,7 @@ pub struct PersistentTotpService {
     user_locks: Arc<Mutex<HashMap<Uuid, Arc<Mutex<()>>>>>,
 }
 
-const TOTP_PREFIX: &str = "sys/mfa/totp/";
+pub(crate) const TOTP_PREFIX: &str = "sys/mfa/totp/";
 
 impl PersistentTotpService {
     pub fn new(

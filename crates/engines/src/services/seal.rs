@@ -29,6 +29,13 @@ pub struct SealService {
     // access to it has been issued. Without this the two events are indistinguishable
     // from outside, and a failure between them leaves a vault that is open and
     // unreachable with no way to ask for the credential again.
+    //
+    // In-process only, by design. The retry it enables works exactly as long as the root
+    // key the barrier was opened with is still in memory: a restart clears that key
+    // (`CryptoService::clear_root_key` on drop, and no key in the environment), so there
+    // is nothing left to mint a credential from and an unseal must present shares again.
+    // Persisting this flag would not change that, so it is not persisted — and every
+    // message and document that describes the retry says so.
     bootstrap_pending: Arc<AtomicBool>,
 
     // Test-only fault injection: when set, the next bootstrap credential issuance fails
@@ -70,6 +77,18 @@ struct EncryptedRootKey {
 const INIT_PATH: &str = "sys/init";
 const ROOT_KEY_PATH: &str = "sys/root_key_enc";
 
+/// Marker written first by `init` and removed only once every initialization artifact
+/// is stored. Its presence means an earlier `init` did not finish — whether it returned
+/// an error or the process died mid-way — and the next attempt must discard the partial
+/// state before starting.
+///
+/// Initialization cannot be one storage transaction: the root account and its TOTP
+/// enrollment are written by the auth and MFA services through their own storage calls,
+/// and the file backend has no transactions at all. A staging marker is what makes the
+/// sequence recoverable regardless of backend, without ever persisting share, root-key
+/// or credential material.
+const INIT_STAGING_PATH: &str = "sys/init_staging";
+
 /// Identity of the account `init` created for root, stored beside the init config.
 ///
 /// The init request carries a `root_username`, so hard-coding `"root"` when issuing the
@@ -83,6 +102,18 @@ const ROOT_IDENTITY_PATH: &str = "sys/root_identity";
 struct RootIdentity {
     id: String,
     username: String,
+}
+
+/// What a partially completed `init` records so a later attempt can clean it up.
+///
+/// Names the account it was about to create and, once known, that account's id — the id
+/// is what locates the TOTP enrollment without decrypting anything. It deliberately holds
+/// no share, token, password or key: recovery must not require storing any of those.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+struct InitStaging {
+    root_username: String,
+    /// Set once the root account exists, so cleanup can find its TOTP enrollment by path.
+    root_entity_id: Option<String>,
 }
 
 impl SealService {
@@ -124,14 +155,28 @@ impl SealService {
     /// Whether an unseal has opened the barrier but its bootstrap credential has not been
     /// issued yet — the state from which a retried unseal can recover the credential
     /// without the shares.
+    ///
+    /// The retry is in-process: it holds only while the barrier is still open in this
+    /// process. After a restart the root key is gone and the shares are required again.
     pub fn bootstrap_is_pending(&self) -> bool {
         self.bootstrap_pending.load(Ordering::SeqCst)
     }
 
     /// Check if the system is initialized
+    ///
+    /// The staging marker is the authority on "not finished": the init config is written
+    /// before the root identity, so a crash or a cleanup that could not remove every
+    /// artifact would otherwise leave a partial initialization looking permanent, and the
+    /// [guard in `init`](Self::init) would refuse the retry that is meant to fix it. A
+    /// marker present means the vault is treated as uninitialised regardless of what else
+    /// is on disk.
     pub async fn is_initialized(&self) -> bool {
-        // We use list instead of get to check existence without reading full data if possible,
-        // but get is safer.
+        if matches!(
+            self.storage.get_by_path(INIT_STAGING_PATH).await,
+            Ok(Some(_))
+        ) {
+            return false;
+        }
         self.storage
             .get_by_path(INIT_PATH)
             .await
@@ -175,6 +220,12 @@ impl SealService {
     /// - Root has NO password.
     /// - Root auth is only via Unseal (SSS).
     /// - Root manages Admins.
+    ///
+    /// Initialization is staged so it is recoverable: a failure anywhere after the first
+    /// write leaves the vault re-initialisable rather than permanently unusable. The
+    /// failure that matters is the one after the init config is stored but before the
+    /// shares reach the operator — the vault is not open, the shares are gone, and without
+    /// staging the init config would refuse every retry.
     pub async fn init(
         &self,
         shares: u8,
@@ -183,6 +234,13 @@ impl SealService {
         auth: &crate::services::auth::AuthenticationService,
         mfa: &secreton_auth::mfa::CombinedMfaService,
     ) -> Result<InitResponse> {
+        // A vault that is mid-initialisation must be rolled back before the
+        // already-initialised guard runs below: a partial attempt has written the init
+        // config, so that guard would reject the very retry that is meant to fix it.
+        self.discard_partial_initialization().await;
+
+        // A vault that already finished initialising must not be overwritten: the root key
+        // in `ROOT_KEY_PATH` is the only thing the existing shares can decrypt.
         if self.is_initialized().await {
             return Err(anyhow!("System already initialized"));
         }
@@ -194,6 +252,32 @@ impl SealService {
             return Err(anyhow!("Threshold must be at least 2"));
         }
 
+        let outcome = self
+            .initialize(shares, threshold, root_username, auth, mfa)
+            .await;
+
+        match outcome {
+            Ok(response) => Ok(response),
+            Err(e) => {
+                // The caller gets the original error, but not before the partial state is
+                // removed so the next attempt starts clean.
+                self.discard_partial_initialization().await;
+                Err(e)
+            }
+        }
+    }
+
+    /// The write sequence for a fresh initialization. Writes a staging marker first and
+    /// removes it last, so its presence after this returns is the signal that the vault is
+    /// mid-initialisation and must be rolled back before any retry.
+    async fn initialize(
+        &self,
+        shares: u8,
+        threshold: u8,
+        root_username: &str,
+        auth: &crate::services::auth::AuthenticationService,
+        mfa: &secreton_auth::mfa::CombinedMfaService,
+    ) -> Result<InitResponse> {
         // 1. Generate Master Key (32 bytes)
         let master_key = secreton_crypto::generate_key(AlgorithmId::Aes256Gcm)?;
 
@@ -209,7 +293,14 @@ impl SealService {
         let splits = shamir::split(&master_key, threshold as usize, shares as usize, &mut rng)
             .map_err(|e| anyhow!("Shamir split failed: {}", e))?;
 
-        // 5. Store Init Config
+        // 5. Staging marker, before any durable artifact of this initialization.
+        self.write_staging(&InitStaging {
+            root_username: root_username.to_string(),
+            root_entity_id: None,
+        })
+        .await?;
+
+        // 6. Store Init Config
         let config = InitConfig { shares, threshold };
         let config_bytes = serde_json::to_vec(&config)?;
 
@@ -224,7 +315,7 @@ impl SealService {
             .await
             .map_err(|e| anyhow!("Failed to store init config: {}", e))?;
 
-        // 6. Store Encrypted Root Key
+        // 7. Store Encrypted Root Key
         let enc_root_bytes = serde_json::to_vec(&EncryptedRootKey {
             data: encrypted_root,
         })?;
@@ -239,7 +330,7 @@ impl SealService {
             .await
             .map_err(|e| anyhow!("Failed to store root key: {}", e))?;
 
-        // 7. Format Response
+        // 8. Format Response
         //
         // Serialise once and encode the same bytes twice. Each share was previously
         // serialised separately per encoding, with the failure discharged by `unwrap` — in
@@ -260,7 +351,7 @@ impl SealService {
             .map(|bytes| base64::Engine::encode(&base64::engine::general_purpose::STANDARD, bytes))
             .collect();
 
-        // 8. Create Root User and Enable MFA
+        // 9. Create Root User and Enable MFA
         // We must temporarily enable the root key so Auth service can encrypt user data
         self.crypto.set_root_key(root_key.clone()).await?;
 
@@ -269,7 +360,6 @@ impl SealService {
         let random_password = Uuid::new_v4().to_string() + &Uuid::new_v4().to_string();
 
         // Execute user creation and MFA setup.
-        // We need to ensure clear_root_key is called even if this fails.
         // Explicitly annotate result type to avoid inference issues with the error type.
         let result: Result<(secreton_auth::mfa::TotpEnrollment, RootIdentity), anyhow::Error> =
             async {
@@ -301,33 +391,41 @@ impl SealService {
             }
             .await;
 
-        // Persist the created root identity before the root key is cleared. Reading it
-        // back needs no key of its own — it names an account, it does not authenticate
-        // one — so this cannot fail for the reason the account lookup would.
-        let (totp_config, root_identity) = match result {
-            Ok((totp_config, identity)) => {
-                let bytes = serde_json::to_vec(&identity)?;
-                self.storage
-                    .store(&SecretEntry::new(
-                        ROOT_IDENTITY_PATH.to_string(),
-                        bytes,
-                        EncryptionMetadata::default(),
-                        SecurityLevel::Internal,
-                        Uuid::nil(),
-                    ))
-                    .await
-                    .map_err(|e| anyhow!("Failed to store root identity: {}", e))?;
-                (totp_config, identity)
-            }
-            Err(e) => {
-                // Clear root key immediately after use, regardless of success/failure
-                self.crypto.clear_root_key().await;
-                return Err(e);
-            }
-        };
-
-        // Clear root key immediately after use, regardless of success/failure
+        // The generated root key is no longer needed once the account records are
+        // encrypted, and must not survive this call either way. Clear it before examining
+        // the result so no early return can skip it.
         self.crypto.clear_root_key().await;
+        let (totp_config, root_identity) = result?;
+
+        // Record the account id in staging, so a failure between here and the identity
+        // store can still find the TOTP enrollment to clean up.
+        self.write_staging(&InitStaging {
+            root_username: root_identity.username.clone(),
+            root_entity_id: Some(root_identity.id.clone()),
+        })
+        .await?;
+
+        // Persist the created root identity. Reading it back needs no key of its own — it
+        // names an account, it does not authenticate one.
+        let bytes = serde_json::to_vec(&root_identity)?;
+        self.storage
+            .store(&SecretEntry::new(
+                ROOT_IDENTITY_PATH.to_string(),
+                bytes,
+                EncryptionMetadata::default(),
+                SecurityLevel::Internal,
+                Uuid::nil(),
+            ))
+            .await
+            .map_err(|e| anyhow!("Failed to store root identity: {}", e))?;
+
+        // 10. Initialization is complete: remove the staging marker. Until this succeeds
+        // the vault is still treated as mid-initialisation, which is why a failure here
+        // rolls back rather than advertising a vault whose shares the operator never saw.
+        self.storage
+            .delete_by_path(INIT_STAGING_PATH)
+            .await
+            .map_err(|e| anyhow!("Failed to clear initialization staging marker: {}", e))?;
 
         tracing::info!(
             root_username = %root_identity.username,
@@ -340,6 +438,93 @@ impl SealService {
             root_totp_uri: totp_config.url,
             // Secret removed for security
         })
+    }
+
+    /// Record initialization progress under [`INIT_STAGING_PATH`].
+    async fn write_staging(&self, staging: &InitStaging) -> Result<()> {
+        let bytes = serde_json::to_vec(staging)?;
+        self.storage
+            .store(&SecretEntry::new(
+                INIT_STAGING_PATH.to_string(),
+                bytes,
+                EncryptionMetadata::default(),
+                SecurityLevel::Internal,
+                Uuid::nil(),
+            ))
+            .await
+            .map_err(|e| anyhow!("Failed to record initialization progress: {}", e))
+    }
+
+    /// Remove whatever an incomplete `init` wrote, so a retry can start from scratch.
+    ///
+    /// Acts only when the staging marker is present: a vault that is not mid-initialisation
+    /// must not have its records touched. Individual removal failures are logged and the
+    /// cleanup continues — the caller's original error is the one that matters, and a
+    /// backend that refused one delete is unlikely to accept the next. The marker is the
+    /// last thing removed, so an interrupted cleanup is retried rather than abandoned.
+    ///
+    /// Nothing here stores or logs share, token, password or key material: the marker names
+    /// the account, and the account's own records are located by path.
+    async fn discard_partial_initialization(&self) {
+        match self.storage.get_by_path(INIT_STAGING_PATH).await {
+            Ok(None) => return,
+            Ok(Some(_)) => {}
+            Err(e) => {
+                // Without the marker's contents the account cannot be located; the durable
+                // artifacts are still removed below, and the marker is left for a later
+                // attempt rather than cleared blindly.
+                tracing::error!(
+                    "Could not read the initialization staging marker during cleanup: {}",
+                    e
+                );
+            }
+        }
+
+        let staging = match self.storage.get_by_path(INIT_STAGING_PATH).await {
+            Ok(Some(entry)) => serde_json::from_slice::<InitStaging>(&entry.encrypted_data).ok(),
+            Ok(None) => return,
+            Err(_) => None,
+        };
+
+        if let Some(staging) = &staging {
+            if let Some(entity_id) = &staging.root_entity_id {
+                let totp_path = format!(
+                    "{}{}",
+                    crate::services::mfa_persistence::TOTP_PREFIX,
+                    entity_id
+                );
+                self.remove_and_report(&totp_path).await;
+            }
+            let user_path = format!(
+                "{}{}",
+                crate::services::auth::USER_STORAGE_PREFIX,
+                staging.root_username
+            );
+            self.remove_and_report(&user_path).await;
+        }
+
+        for path in [
+            ROOT_IDENTITY_PATH,
+            ROOT_KEY_PATH,
+            INIT_PATH,
+            INIT_STAGING_PATH,
+        ] {
+            self.remove_and_report(path).await;
+        }
+
+        // The generated root key was installed only to encrypt the account records that
+        // were just removed; a completed initialization would not leave it in place.
+        self.crypto.clear_root_key().await;
+    }
+
+    async fn remove_and_report(&self, path: &str) {
+        if let Err(e) = self.storage.delete_by_path(path).await {
+            tracing::error!(
+                "Failed to remove '{}' while cleaning up an incomplete initialization: {}",
+                path,
+                e
+            );
+        }
     }
 
     /// Submit a share to unseal
@@ -506,7 +691,9 @@ impl SealService {
                 .await;
                 Err(anyhow!(
                     "Vault is unsealed but the root credential could not be issued ({e}). \
-                     Retry unseal; the barrier is open and no shares are needed."
+                     Retry unseal while this process is still running; the barrier is open \
+                     in memory and no shares are needed. A restart discards the in-memory \
+                     root key, so after one the vault must be unsealed again with its shares."
                 ))
             }
         }
@@ -621,13 +808,14 @@ mod tests {
         CombinedMfaService, DefaultPushService, DefaultRecoveryCodeService, DefaultWebAuthnService,
         EmailConfig, InMemoryEmailService, InMemoryHardwareService, InMemorySmsService, SmsConfig,
     };
+    use secreton_storage::StorageResult;
     use secreton_storage::backends::MemoryBackend;
 
     /// A sealed vault with the auth, MFA, audit and admin services wired the way
     /// `Services::new` wires them. Shared by every test here so none of them drifts into
     /// testing a partially connected service graph.
     struct Vault {
-        storage: Arc<MemoryBackend>,
+        storage: Arc<dyn StorageBackend + Send + Sync>,
         crypto: Arc<CryptoService>,
         auth: Arc<AuthenticationService>,
         mfa: Arc<CombinedMfaService>,
@@ -638,6 +826,12 @@ mod tests {
 
     async fn sealed_vault() -> Vault {
         let storage = Arc::new(MemoryBackend::new());
+        sealed_vault_with_storage(storage).await
+    }
+
+    /// The same graph as [`sealed_vault`], over a caller-supplied backend so a test can
+    /// inject storage faults without a second service wiring.
+    async fn sealed_vault_with_storage(storage: Arc<dyn StorageBackend + Send + Sync>) -> Vault {
         let crypto = Arc::new(CryptoService::new(storage.clone()).await.unwrap());
 
         let mut config = AuthConfig::default();
@@ -946,6 +1140,64 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn bootstrap_recovery_does_not_survive_a_restart() {
+        // The retry documented for a failed credential issuance is deliberately
+        // in-process. This pins that boundary: a fresh service graph over the same storage
+        // has no pending state and a sealed barrier, so it cannot mint a credential
+        // without the shares — and does not pretend it could.
+        let _env = crate::test_support::without_root_key();
+        let vault = sealed_vault().await;
+
+        const ROOT_USERNAME: &str = "restart-root";
+        let init = vault
+            .seal
+            .init(2, 2, ROOT_USERNAME, &vault.auth, &vault.mfa)
+            .await
+            .expect("init");
+
+        vault.seal.fail_next_bootstrap.store(true, Ordering::SeqCst);
+        vault.seal.unseal(&init.keys[0]).await.expect("share one");
+        assert!(vault.seal.unseal(&init.keys[1]).await.is_err());
+        assert!(vault.seal.bootstrap_is_pending());
+
+        // Restart: same durable storage, brand-new in-memory services.
+        let restarted = sealed_vault_with_storage(vault.storage.clone()).await;
+        assert!(
+            !restarted.seal.bootstrap_is_pending(),
+            "the pending state is in memory and does not survive a restart"
+        );
+        assert!(
+            restarted.seal.is_sealed().await,
+            "a restart drops the in-memory root key, so the barrier is sealed"
+        );
+
+        // The barrier is sealed and no credential is owed, so a call without shares is
+        // refused rather than answered with a credential the process cannot back.
+        let without_shares = restarted.seal.unseal("a string that is not a share").await;
+        assert!(
+            without_shares.is_err(),
+            "a restarted vault must not recover a credential without its shares"
+        );
+
+        // And with the shares it unseals exactly as it did the first time.
+        restarted
+            .seal
+            .unseal(&init.keys[0])
+            .await
+            .expect("share one");
+        let complete = restarted
+            .seal
+            .unseal(&init.keys[1])
+            .await
+            .expect("share two");
+        let token = complete
+            .root_token
+            .expect("root credential after re-unseal");
+        let claims = claims_of(&token);
+        assert_eq!(claims["username"], ROOT_USERNAME);
+    }
+
+    #[tokio::test]
     async fn sealing_again_clears_the_pending_bootstrap_and_requires_the_shares() {
         let _env = crate::test_support::without_root_key();
         let vault = sealed_vault().await;
@@ -999,5 +1251,237 @@ mod tests {
         assert!(!vault.seal.is_initialized().await);
         let result = vault.seal.unseal("00").await;
         assert!(result.is_err());
+    }
+
+    /// A backend that refuses one write and passes everything else through.
+    ///
+    /// `fail_stores_for` names the exact path whose *next* store returns an error. The
+    /// fault is transient and narrow on purpose: it reproduces the failure an operator
+    /// cannot retry by hand — a storage hiccup at one step of initialization — without
+    /// breaking any other part of the service graph.
+    #[derive(Debug)]
+    struct OneShotStoreFailure {
+        inner: MemoryBackend,
+        path: String,
+        armed: std::sync::atomic::AtomicBool,
+    }
+
+    impl OneShotStoreFailure {
+        fn arming(path: &str) -> Self {
+            Self {
+                inner: MemoryBackend::new(),
+                path: path.to_string(),
+                armed: std::sync::atomic::AtomicBool::new(true),
+            }
+        }
+    }
+
+    #[async_trait::async_trait]
+    impl StorageBackend for OneShotStoreFailure {
+        async fn store(&self, entry: &SecretEntry) -> StorageResult<()> {
+            if entry.path == self.path
+                && self.armed.swap(false, std::sync::atomic::Ordering::SeqCst)
+            {
+                return Err(secreton_storage::StorageError::BackendError {
+                    backend: "fault-injected".to_string(),
+                    message: "injected one-shot store failure".to_string(),
+                });
+            }
+            self.inner.store(entry).await
+        }
+
+        async fn get_by_id(&self, id: Uuid) -> StorageResult<Option<SecretEntry>> {
+            self.inner.get_by_id(id).await
+        }
+        async fn get_by_path(&self, path: &str) -> StorageResult<Option<SecretEntry>> {
+            self.inner.get_by_path(path).await
+        }
+        async fn update(&self, entry: &SecretEntry) -> StorageResult<()> {
+            self.inner.update(entry).await
+        }
+        async fn delete_by_id(&self, id: Uuid) -> StorageResult<bool> {
+            self.inner.delete_by_id(id).await
+        }
+        async fn delete_by_path(&self, path: &str) -> StorageResult<bool> {
+            self.inner.delete_by_path(path).await
+        }
+        async fn list(
+            &self,
+            params: &secreton_storage::QueryParams,
+        ) -> StorageResult<Vec<SecretEntry>> {
+            self.inner.list(params).await
+        }
+        async fn count(&self, params: &secreton_storage::QueryParams) -> StorageResult<u64> {
+            self.inner.count(params).await
+        }
+        async fn exists(&self, path: &str) -> StorageResult<bool> {
+            self.inner.exists(path).await
+        }
+        async fn begin_transaction(
+            &self,
+        ) -> StorageResult<Box<dyn secreton_storage::StorageTransaction>> {
+            self.inner.begin_transaction().await
+        }
+        async fn health_check(&self) -> StorageResult<secreton_storage::HealthStatus> {
+            self.inner.health_check().await
+        }
+        async fn get_stats(&self) -> StorageResult<secreton_storage::StorageStats> {
+            self.inner.get_stats().await
+        }
+        async fn migrate(&self) -> StorageResult<()> {
+            self.inner.migrate().await
+        }
+        async fn compact(&self) -> StorageResult<()> {
+            self.inner.compact().await
+        }
+        async fn vacuum(&self) -> StorageResult<()> {
+            self.inner.vacuum().await
+        }
+        async fn delete_expired(&self, path_prefix: Option<String>) -> StorageResult<u64> {
+            self.inner.delete_expired(path_prefix).await
+        }
+        async fn store_oauth_state(
+            &self,
+            state: &secreton_domain::OAuthState,
+        ) -> StorageResult<()> {
+            self.inner.store_oauth_state(state).await
+        }
+        async fn get_oauth_state(
+            &self,
+            state: &str,
+        ) -> StorageResult<Option<secreton_domain::OAuthState>> {
+            self.inner.get_oauth_state(state).await
+        }
+        async fn delete_expired_oauth_states(&self) -> StorageResult<u64> {
+            self.inner.delete_expired_oauth_states().await
+        }
+    }
+
+    #[tokio::test]
+    async fn a_failed_root_identity_write_leaves_the_vault_reinitialisable() {
+        // Regression (severe): `init` stored the init config before the root identity, so a
+        // failure writing the identity returned an error *after* the vault looked
+        // initialised. No shares reached the operator, `init` refused to run again, and a
+        // restart discarded the in-memory root key — a new vault nobody could ever unseal.
+        let _env = crate::test_support::without_root_key();
+        let storage = Arc::new(OneShotStoreFailure::arming(ROOT_IDENTITY_PATH));
+        let vault = sealed_vault_with_storage(storage).await;
+
+        // 1. The first init fails, and does not hand back any shares.
+        let first = vault
+            .seal
+            .init(3, 2, "recovered-root", &vault.auth, &vault.mfa)
+            .await;
+        assert!(
+            first.is_err(),
+            "the injected identity-write failure must surface as an init error"
+        );
+
+        // 2. The vault is not left in an initialised state, even though the init config
+        // was written before the failure.
+        assert!(
+            !vault.seal.is_initialized().await,
+            "a failed init must not advertise an initialised vault"
+        );
+
+        // 3. The next init succeeds with no restart and no manual cleanup.
+        let second = vault
+            .seal
+            .init(3, 2, "recovered-root", &vault.auth, &vault.mfa)
+            .await
+            .expect("a retry must be able to initialise the vault");
+
+        // 4. Its shares open the vault and yield a credential for the account it named.
+        vault.seal.unseal(&second.keys[0]).await.expect("share one");
+        let complete = vault.seal.unseal(&second.keys[1]).await.expect("share two");
+        let token = complete
+            .root_token
+            .expect("a recovered initialization must issue a bootstrap credential");
+        let claims = claims_of(&token);
+        assert_eq!(
+            claims["username"], "recovered-root",
+            "the credential must name the account the successful init created"
+        );
+
+        // 5. The stale artifacts from the failed attempt are gone, so the second
+        // initialization is the only one recorded.
+        assert!(
+            vault
+                .storage
+                .get_by_path(INIT_STAGING_PATH)
+                .await
+                .expect("storage")
+                .is_none(),
+            "a completed init must not leave its staging marker behind"
+        );
+    }
+
+    #[tokio::test]
+    async fn a_leftover_staging_marker_makes_the_vault_look_uninitialised_and_recover() {
+        // The crash case: a process dies between writing the init config and completing
+        // initialization, so no cleanup runs and both the config and the marker are on
+        // disk. The config alone would read as "initialized" and refuse the retry; the
+        // marker is what says the work is unfinished, so the retry must be allowed.
+        let _env = crate::test_support::without_root_key();
+        let storage = Arc::new(MemoryBackend::new());
+        let vault = sealed_vault_with_storage(storage.clone()).await;
+
+        let config = serde_json::to_vec(&InitConfig {
+            shares: 3,
+            threshold: 2,
+        })
+        .expect("serialise init config");
+        storage
+            .store(&SecretEntry::new(
+                INIT_PATH.to_string(),
+                config,
+                EncryptionMetadata::default(),
+                SecurityLevel::Public,
+                Uuid::nil(),
+            ))
+            .await
+            .expect("store a partial init config");
+        let staging = serde_json::to_vec(&InitStaging {
+            root_username: "crashed-root".to_string(),
+            root_entity_id: None,
+        })
+        .expect("serialise staging");
+        storage
+            .store(&SecretEntry::new(
+                INIT_STAGING_PATH.to_string(),
+                staging,
+                EncryptionMetadata::default(),
+                SecurityLevel::Internal,
+                Uuid::nil(),
+            ))
+            .await
+            .expect("store a staging marker");
+
+        assert!(
+            !vault.seal.is_initialized().await,
+            "a staging marker must override a partial init config"
+        );
+
+        // The retry rolls the partial state back and initialises for real, so the shares
+        // it hands back are the ones that open this vault.
+        let response = vault
+            .seal
+            .init(3, 2, "crash-recovered-root", &vault.auth, &vault.mfa)
+            .await
+            .expect("a leftover staging marker must not block a retry");
+        vault
+            .seal
+            .unseal(&response.keys[0])
+            .await
+            .expect("share one");
+        let complete = vault
+            .seal
+            .unseal(&response.keys[1])
+            .await
+            .expect("share two");
+        let token = complete
+            .root_token
+            .expect("the recovered initialization must issue a bootstrap credential");
+        assert_eq!(claims_of(&token)["username"], "crash-recovered-root");
     }
 }

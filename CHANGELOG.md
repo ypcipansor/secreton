@@ -88,6 +88,13 @@ and ~59k, and from not compiling at all to a green build with a full test suite.
   tree scan reports one finding — a `"transit-_key-1"` string literal in a
   key-rotation test, scored as a generic API key on entropy — which names a key rather
   than containing one. It is listed in `.gitleaksignore`.
+- **A failure while initialising a new vault could make it permanently unusable.** `init`
+  stored the initialization status before writing the root identity; if that write failed,
+  the call returned an error before the unseal shares reached the operator, every later
+  `init` was refused because the status looked set, and a restart discarded the in-memory
+  root key. Initialization is now staged: a marker is written first and removed last, a
+  failure rolls the partial state back, and the vault is re-initialisable without a restart
+  or manual cleanup.
 
 ### Removed
 
@@ -123,6 +130,10 @@ and ~59k, and from not compiling at all to a green build with a full test suite.
 - Rebuilt CI: concurrency groups, a wasm guardrail job, a feature matrix, SHA-pinned
   third-party actions, and `--locked` everywhere. `Cargo.lock` is now committed.
 - A single multi-stage `Dockerfile` producing a distroless, non-root image on one port.
+- A root `package.json` pinning `playwright-core` for the screenshot capture. The tooling
+  is opt-in and separate from the Rust build: `npm ci` installs the pinned dependency,
+  `npm run browser:install` fetches the matching Chromium, and `npm run screenshots`
+  captures. No `postinstall` hook reaches the network.
 
 ## [0.1.0] - 2026-05-20
 

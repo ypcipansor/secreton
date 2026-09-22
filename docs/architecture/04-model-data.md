@@ -117,8 +117,21 @@ Root tidak memiliki login password. `init` menerima `root_username` dan membuat 
 dengan nama tersebut; identitasnya disimpan agar `unseal` menerbitkan token untuk akun itu,
 bukan untuk nama tetap `"root"`. Token tersebut berlaku satu jam (TTL bootstrap tetap, tidak
 mengikuti session timeout yang dapat dikonfigurasi), dan hanya setelah threshold share
-tercapai. Jika penerbitan token gagal setelah barrier terbuka, ulangi panggilan `unseal`;
-vault tetap terbuka dan tidak perlu share lagi.
+tercapai. Jika penerbitan token gagal setelah barrier terbuka, ulangi panggilan `unseal`
+selama proses belum restart; vault tetap terbuka di memori dan tidak perlu share lagi.
+Retry ini tidak bertahan melewati restart: root key hanya ada di memori, sehingga setelah
+restart vault harus di-unseal kembali dengan share-nya.
+
+`init` bersifat bertahap (staged). Sebuah marker di `sys/init_staging` ditulis sebelum
+artefak durabel pertama (`sys/init`, `sys/root_key_enc`, `sys/root_identity`, akun root dan
+enrollment TOTP) dan dihapus paling akhir. Selama marker ada, vault dianggap belum
+terinisialisasi: `is_initialized()` mengembalikan false walaupun `sys/init` sudah tertulis.
+Jika salah satu langkah gagal, `init` menghapus state parsial itu dan mengembalikan error
+aslinya, sehingga pemanggilan `init` berikutnya berhasil tanpa restart atau pembersihan
+manual — shares tidak pernah diterima operator pada percobaan yang gagal, jadi state
+setengah jadi tidak boleh terlihat permanen. Marker tidak menyimpan share, token, password,
+JWT secret, atau root key; ia hanya mencatat nama akun root dan id entitas untuk menemukan
+record TOTP yang perlu dibersihkan.
 
 Lockout: setelah 5 percobaan gagal, akun non-privileged dikunci selama 15 menit
 (`crates/engines/src/services/auth.rs`). Akun privileged sengaja tidak dikunci dengan cara

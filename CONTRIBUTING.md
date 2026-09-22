@@ -33,7 +33,8 @@ because violating it caused a real defect here. The three that surprise people m
   compile on 1.94.1 (E0658). See the Dockerfile.
 - PostgreSQL and MySQL — only if you are working on the dynamic database-credentials
   engine. Everything else runs against in-memory storage with no external service.
-- Node and `playwright-core` — only for regenerating screenshots.
+- Node and `playwright-core` — only for regenerating screenshots. The version is pinned in
+  the root `package.json`; see [Screenshots](#screenshots).
 
 ### Get it running
 
@@ -158,10 +159,21 @@ UI changes should show their result. The capture script signs in through the rea
 the session is in an `HttpOnly` cookie, so driving the form is the only way in — and fails
 if any view is blank, errored, overflowing, or logging an unexpected console error.
 
+Its one dependency is declared and pinned in the root [`package.json`](package.json), so a
+capture is reproducible rather than dependent on whatever `NODE_PATH` happens to hold.
+None of this is part of the Rust build.
+
 ```bash
+npm ci                                      # installs the pinned playwright-core
+npm run browser:install                     # once, fetches the matching Chromium
+npm run screenshots:check                   # optional: prove the browser launches
 cargo leptos serve                          # in one terminal
-node scripts/screenshots.mjs                # in another
+npm run screenshots                         # in another
 ```
+
+`npm run browser:install` is a separate step on purpose: `npm install` should not reach the
+network for a browser, and neither should anything in the Rust build. If you already have a
+Chromium, skip it and set `CHROMIUM_PATH=/path/to/chromium`.
 
 It writes `docs/screenshots/*.png`, which the README embeds. A screenshot that shows a
 blank page or a raw error is worse than none, which is why the script asserts rather than

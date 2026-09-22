@@ -115,8 +115,16 @@ done <<< "$KEYS"
 Store the shares and the root token somewhere safe — the shares are the only way to unseal
 after a restart. The root token is a bootstrap credential: it expires one hour after it is
 issued, and is deliberately not tied to the configurable session timeout. If issuing it
-fails after the barrier has already opened, repeat the unseal call — the vault stays open
-and no shares are needed to retry.
+fails after the barrier has already opened, repeat the unseal call while the process is
+still running — the barrier stays open in memory and no shares are needed to retry. That
+retry does not survive a restart: restarting discards the in-memory root key, so the vault
+must be unsealed again with its shares.
+
+A failed `init` is safe to retry. The steps are staged under `sys/init_staging`, written
+before the first durable artifact and cleared last; until the marker is gone the vault is
+treated as uninitialised, and a failure removes the partial state so the next `init`
+succeeds without a restart. A failed attempt never hands shares to the operator, so it must
+not leave a vault that looks permanently initialised.
 
 Root has no password login, so the UI needs a real account. Create one with the root token:
 
@@ -206,11 +214,18 @@ no second HTTP stack and no port offset.
 
 ### Screenshots
 
-`cargo leptos serve` in one terminal, then:
+The capture script's one dependency is pinned in the root `package.json`; nothing there is
+part of the Rust build. `cargo leptos serve` in one terminal, then:
 
 ```bash
-node scripts/screenshots.mjs
+npm ci                          # installs the pinned playwright-core
+npm run browser:install         # once, fetches the matching Chromium
+npm run screenshots
 ```
+
+If you already have a Chromium, skip `browser:install` and set
+`CHROMIUM_PATH=/path/to/chromium`. `npm run screenshots:check` verifies the setup without
+capturing.
 
 It signs in through the real form — the session lives in an `HttpOnly` cookie, so driving
 the form is the only way in — captures every view into `docs/screenshots/`, and exits

@@ -7,17 +7,18 @@
 // a control too small to click, or logs a console error that is not the expected 404.
 //
 // Usage:
+//   npm install                              # installs the pinned playwright-core
+//   npm run browser:install                  # once, to fetch the matching Chromium
 //   cargo leptos serve                       # in one terminal
-//   node scripts/screenshots.mjs             # in another
+//   npm run screenshots                      # in another
 //
-// Needs `playwright-core` to resolve. Either install it locally, or point NODE_PATH at an
-// existing install:
-//   npm i -D playwright-core
-//   NODE_PATH=/path/to/node_modules node scripts/screenshots.mjs
+// The dependency is declared and pinned in the root `package.json`; nothing here is part
+// of the Rust build. `npm run screenshots:check` verifies the setup without capturing.
+// If you already have a Chromium, skip the download and set CHROMIUM_PATH to it.
 //
 // Environment:
 //   BASE_URL            default http://127.0.0.1:3000
-//   CHROMIUM_PATH       browser binary; default is auto-detected
+//   CHROMIUM_PATH       browser binary; default is the one Playwright installed
 //   SCREENSHOT_USER     demo account username (default "demo")
 //   SCREENSHOT_PASSWORD demo account password (required if the login views are captured)
 
@@ -40,8 +41,8 @@ try {
   ({ chromium } = require("playwright-core"));
 } catch {
   console.error(
-    "playwright-core not found. Run `npm i -D playwright-core`, or set NODE_PATH to an " +
-      "existing install."
+    "playwright-core not found. Run `npm install` in the repository root, then " +
+      "`npm run screenshots:check` to verify the browser is available."
   );
   process.exit(2);
 }
@@ -75,7 +76,15 @@ async function shoot(page, name, urlPath, expectedStatus) {
   });
 
   const file = path.join(OUT, `${name}.png`);
-  await page.screenshot({ path: file, fullPage: true });
+  // `animations: "disabled"` settles CSS transitions before capture; without it a
+  // running animation can stall the screenshot on some Chromium builds. The explicit
+  // timeout keeps a hung capture from blocking the whole run.
+  await page.screenshot({
+    path: file,
+    fullPage: true,
+    animations: "disabled",
+    timeout: 30000,
+  });
   page.off("pageerror", onError);
   page.off("console", onConsole);
 
@@ -93,6 +102,8 @@ async function shoot(page, name, urlPath, expectedStatus) {
 }
 
 async function signIn(page) {
+  // A fresh context starts on about:blank; the form only exists on the login page.
+  await page.goto(BASE + "/login", { waitUntil: "networkidle" });
   await page.waitForSelector('input[name="credentials[username]"]', { timeout: 20000 });
   await page.fill('input[name="credentials[username]"]', USER);
   await page.fill('input[name="credentials[password]"]', PASSWORD);
@@ -103,7 +114,25 @@ async function signIn(page) {
 
 async function main() {
   fs.mkdirSync(OUT, { recursive: true });
-  const browser = await chromium.launch(launchOptions());
+
+  let browser;
+  try {
+    browser = await chromium.launch(launchOptions());
+  } catch (e) {
+    console.error(
+      [
+        "Could not launch Chromium.",
+        "",
+        EXECUTABLE
+          ? `CHROMIUM_PATH is set to ${EXECUTABLE}; check that it exists and is executable.`
+          : "Install the browser the pinned Playwright expects: npm run browser:install",
+        "Or set CHROMIUM_PATH to a system Chromium you already have.",
+        "",
+        `Underlying error: ${e}`,
+      ].join("\n")
+    );
+    process.exit(3);
+  }
 
   console.log("signed-out views");
   const anon = await browser.newContext({ viewport: DESKTOP });
@@ -133,7 +162,12 @@ async function main() {
   page.off("pageerror", onDenialError);
   page.off("console", onDenialConsole);
 
-  await page.screenshot({ path: path.join(OUT, "login-error.png"), fullPage: true });
+  await page.screenshot({
+    path: path.join(OUT, "login-error.png"),
+    fullPage: true,
+    animations: "disabled",
+    timeout: 30000,
+  });
   const errText = await page.locator("body").innerText();
   const errFile = path.join(OUT, "login-error.png");
   const alertText = (await page.locator('[role="alert"]').innerText()).trim();
@@ -160,11 +194,21 @@ async function main() {
 
   console.log("signed-in views");
   // The session lives only in an httpOnly cookie, so the real form is the only way in.
-  await signIn(page);
-  await shoot(page, "dashboard", "/", 200);
+  //
+  // Each signed-in view signs in on its own fresh context. Signing in twice through the
+  // same page and then capturing a full-page screenshot wedged the capture on a headless
+  // Chromium build — the screenshot never completed even with animations disabled, while
+  // the identical sequence on a fresh context returned immediately. A clean context per
+  // view is also closer to what a real visitor does.
+  const desk = await browser.newContext({ viewport: DESKTOP });
+  const dPage = await desk.newPage();
+  await signIn(dPage);
+  await shoot(dPage, "dashboard", "/", 200);
 
-  await signIn(mLogin);
-  await shoot(mLogin, "mobile-dashboard", "/", 200);
+  const phone = await browser.newContext({ viewport: MOBILE });
+  const pPage = await phone.newPage();
+  await signIn(pPage);
+  await shoot(pPage, "mobile-dashboard", "/", 200);
 
   await browser.close();
 

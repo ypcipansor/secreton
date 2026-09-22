@@ -245,6 +245,15 @@ membacanya. Klien programatik (CLI, agent, layanan lain) memakai
 | Unseal | Shamir secret sharing |
 | RSA | **Tidak ada kunci RSA yang dibuat atau diterima** |
 
+Root key hasil rekonstruksi hanya hidup di memori. Jika penerbitan token root gagal setelah
+barrier terbuka, `unseal` dapat diulang tanpa share selama proses belum restart; setelah
+restart, root key hilang dan share diperlukan kembali
+(`crates/engines/src/services/seal.rs`).
+
+`init` juga bertahap: state parsial di bawah `sys/init_staging` membuat vault tetap
+terlihat belum terinisialisasi sampai semua artefak init tersimpan, dan kegagalan di
+tengah jalan dibersihkan sehingga `init` berikutnya berhasil tanpa restart.
+
 ### 5.4 Header Keamanan
 
 Diterapkan oleh middleware `security_headers` pada setiap respons. Detailnya ada di
