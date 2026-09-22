@@ -408,8 +408,13 @@ impl SealService {
         // the password path — which stopped covering it the moment init accepted a custom
         // `root_username`.
         //
-        // Execute user creation and MFA setup.
-        // Explicitly annotate result type to avoid inference issues with the error type.
+        // Create the account, record its id in staging, then enroll TOTP. The order is the
+        // fix: `write_staging` persists the account id *before* the enrollment exists, so
+        // any failure at or after enrollment leaves a marker that names the account whose
+        // TOTP record must be removed. The previous order enrolled first and recorded the
+        // id second, so a failure on that second staging write returned an error, cleanup
+        // read a marker with `root_entity_id: None`, deleted the account by username but
+        // could not locate its enrollment — which stayed behind as an orphan.
         let result: Result<(secreton_auth::mfa::TotpEnrollment, RootIdentity), anyhow::Error> =
             async {
                 let root_user = auth
@@ -422,6 +427,18 @@ impl SealService {
                     .await
                     .map_err(|e| anyhow!("Failed to create root user: {}", e))?;
 
+                let identity = RootIdentity {
+                    id: root_user.id.clone(),
+                    username: root_user.username.clone(),
+                };
+
+                self.write_staging(&InitStaging {
+                    root_username: identity.username.clone(),
+                    root_entity_id: Some(identity.id.clone()),
+                    committed: false,
+                })
+                .await?;
+
                 // Enable TOTP for Root
                 // IMPORTANT: Must be done BEFORE clearing the root key because PersistentTotpService encrypts the secret!
                 let user_uuid = Uuid::parse_str(&root_user.id).unwrap_or_default();
@@ -429,11 +446,6 @@ impl SealService {
                     .enable_totp(user_uuid, root_user.username.clone())
                     .await
                     .map_err(|e| anyhow!("Failed to enable TOTP for root user: {}", e))?;
-
-                let identity = RootIdentity {
-                    id: root_user.id.clone(),
-                    username: root_user.username.clone(),
-                };
 
                 Ok((totp_config, identity))
             }
@@ -444,15 +456,6 @@ impl SealService {
         // the result so no early return can skip it.
         self.crypto.clear_root_key().await;
         let (totp_config, root_identity) = result?;
-
-        // Record the account id in staging, so a failure between here and the identity
-        // store can still find the TOTP enrollment to clean up.
-        self.write_staging(&InitStaging {
-            root_username: root_identity.username.clone(),
-            root_entity_id: Some(root_identity.id.clone()),
-            committed: false,
-        })
-        .await?;
 
         // Persist the created root identity. Reading it back needs no key of its own — it
         // names an account, it does not authenticate one.
@@ -2097,7 +2100,7 @@ mod tests {
         assert!(
             !vault
                 .auth
-                .verify_password("root", "legacy-generated-password")
+                .verify_password("root", &crate::test_support::generated_password())
                 .await
                 .expect("verify"),
             "the adopted root account must not be password-authenticatable"
@@ -2122,11 +2125,12 @@ mod tests {
         vault.seal.unseal(&init.keys[0]).await.expect("share one");
         vault.seal.unseal(&init.keys[1]).await.expect("share two");
 
+        let decoy_password = crate::test_support::generated_password();
         let decoy = vault
             .auth
             .register_user(
                 "root",
-                "some-password",
+                &decoy_password,
                 Some("root@system.local".to_string()),
                 vec!["root".to_string(), "admin".to_string()],
                 vec!["*".to_string()],
@@ -2161,7 +2165,7 @@ mod tests {
         assert!(
             vault
                 .auth
-                .verify_password("root", "some-password")
+                .verify_password("root", &decoy_password)
                 .await
                 .expect("verify"),
             "no repair may run against a corrupt identity"
@@ -2425,6 +2429,239 @@ mod tests {
         async fn delete_expired_oauth_states(&self) -> StorageResult<u64> {
             self.inner.delete_expired_oauth_states().await
         }
+    }
+
+    /// Fails the *next* staging-marker upsert that happens while a TOTP enrollment is
+    /// already present, then passes every later write through.
+    ///
+    /// That condition — "the marker is being updated after the enrollment was created" — is
+    /// exactly the window the orphan bug lived in: if the marker written before the
+    /// enrollment did not already name the account, cleanup could not find the enrollment to
+    /// remove. Keying the fault to the enrollment's presence, rather than to the Nth staging
+    /// write, keeps the test meaningful across a reordering of the writes.
+    #[derive(Debug)]
+    struct FailStagingWhileTotpExists {
+        inner: MemoryBackend,
+        armed: std::sync::atomic::AtomicBool,
+        fired: std::sync::atomic::AtomicBool,
+    }
+
+    impl FailStagingWhileTotpExists {
+        fn new() -> Self {
+            Self {
+                inner: MemoryBackend::new(),
+                armed: std::sync::atomic::AtomicBool::new(true),
+                fired: std::sync::atomic::AtomicBool::new(false),
+            }
+        }
+
+        async fn totp_exists(&self) -> bool {
+            !self
+                .inner
+                .list(
+                    &secreton_storage::QueryParams::new().with_path_prefix(
+                        crate::services::mfa_persistence::TOTP_PREFIX.to_string(),
+                    ),
+                )
+                .await
+                .expect("list")
+                .is_empty()
+        }
+    }
+
+    #[async_trait::async_trait]
+    impl StorageBackend for FailStagingWhileTotpExists {
+        async fn store(&self, entry: &SecretEntry) -> StorageResult<()> {
+            self.inner.store(entry).await
+        }
+        async fn get_by_id(&self, id: Uuid) -> StorageResult<Option<SecretEntry>> {
+            self.inner.get_by_id(id).await
+        }
+        async fn get_by_path(&self, path: &str) -> StorageResult<Option<SecretEntry>> {
+            self.inner.get_by_path(path).await
+        }
+        async fn update(&self, entry: &SecretEntry) -> StorageResult<()> {
+            self.inner.update(entry).await
+        }
+        async fn upsert(&self, entry: &SecretEntry) -> StorageResult<()> {
+            // `totp_exists` is checked before the armed flag is consumed: the first staging
+            // write happens before the enrollment exists and must not spend the one fault.
+            if entry.path == INIT_STAGING_PATH
+                && self.totp_exists().await
+                && self.armed.swap(false, std::sync::atomic::Ordering::SeqCst)
+            {
+                self.fired.store(true, std::sync::atomic::Ordering::SeqCst);
+                return Err(secreton_storage::StorageError::BackendError {
+                    backend: "fault-injected".to_string(),
+                    message: "injected staging update failure after TOTP enrollment".to_string(),
+                });
+            }
+            self.inner.upsert(entry).await
+        }
+        async fn delete_by_id(&self, id: Uuid) -> StorageResult<bool> {
+            self.inner.delete_by_id(id).await
+        }
+        async fn delete_by_path(&self, path: &str) -> StorageResult<bool> {
+            self.inner.delete_by_path(path).await
+        }
+        async fn list(
+            &self,
+            params: &secreton_storage::QueryParams,
+        ) -> StorageResult<Vec<SecretEntry>> {
+            self.inner.list(params).await
+        }
+        async fn count(&self, params: &secreton_storage::QueryParams) -> StorageResult<u64> {
+            self.inner.count(params).await
+        }
+        async fn exists(&self, path: &str) -> StorageResult<bool> {
+            self.inner.exists(path).await
+        }
+        async fn begin_transaction(
+            &self,
+        ) -> StorageResult<Box<dyn secreton_storage::StorageTransaction>> {
+            self.inner.begin_transaction().await
+        }
+        async fn health_check(&self) -> StorageResult<secreton_storage::HealthStatus> {
+            self.inner.health_check().await
+        }
+        async fn get_stats(&self) -> StorageResult<secreton_storage::StorageStats> {
+            self.inner.get_stats().await
+        }
+        async fn migrate(&self) -> StorageResult<()> {
+            self.inner.migrate().await
+        }
+        async fn compact(&self) -> StorageResult<()> {
+            self.inner.compact().await
+        }
+        async fn vacuum(&self) -> StorageResult<()> {
+            self.inner.vacuum().await
+        }
+        async fn delete_expired(&self, path_prefix: Option<String>) -> StorageResult<u64> {
+            self.inner.delete_expired(path_prefix).await
+        }
+        async fn store_oauth_state(
+            &self,
+            state: &secreton_domain::OAuthState,
+        ) -> StorageResult<()> {
+            self.inner.store_oauth_state(state).await
+        }
+        async fn get_oauth_state(
+            &self,
+            state: &str,
+        ) -> StorageResult<Option<secreton_domain::OAuthState>> {
+            self.inner.get_oauth_state(state).await
+        }
+        async fn delete_expired_oauth_states(&self) -> StorageResult<u64> {
+            self.inner.delete_expired_oauth_states().await
+        }
+    }
+
+    #[tokio::test]
+    async fn a_failed_staging_update_after_totp_creation_does_not_orphan_the_enrollment() {
+        // Regression: `init` enrolled TOTP *before* recording the account id in the staging
+        // marker, so a staging-write failure in that window returned an error while the
+        // marker still said `root_entity_id: None`. Cleanup could delete the account by
+        // username but had no id to locate the enrollment by, so the TOTP record survived
+        // the failed initialization — an orphaned second-factor enrollment for a privileged
+        // account that `init` believed it had rolled back. The fix records the id in staging
+        // *before* enrolling, so cleanup can always find what it created.
+        let _env = crate::test_support::without_root_key();
+        let storage = Arc::new(FailStagingWhileTotpExists::new());
+        let vault = sealed_vault_with_storage(storage.clone()).await;
+
+        let first = vault
+            .seal
+            .init(3, 2, "orphan-root", &vault.auth, &vault.mfa)
+            .await;
+        assert!(
+            first.is_err(),
+            "the injected staging failure after TOTP creation must fail `init`"
+        );
+        assert!(
+            storage.fired.load(std::sync::atomic::Ordering::SeqCst),
+            "the fault must actually have fired, or this test proves nothing"
+        );
+        assert!(
+            first.unwrap_err().to_string().contains("injected"),
+            "the caller must receive the injected failure"
+        );
+        assert!(
+            !vault.seal.is_initialized().await,
+            "a rolled-back init must not advertise an initialised vault"
+        );
+
+        // Every artifact of the failed attempt is gone: the TOTP enrollment, the account,
+        // the root identity, the root key, the init config and the staging marker.
+        assert!(
+            !storage.totp_exists().await,
+            "the TOTP enrollment created before the failure must not be orphaned"
+        );
+        assert!(
+            !storage
+                .exists(&format!(
+                    "{}{}",
+                    crate::services::auth::USER_STORAGE_PREFIX,
+                    "orphan-root"
+                ))
+                .await
+                .expect("exists"),
+            "the root account created before the failure must be removed"
+        );
+        assert!(
+            storage
+                .get_by_path(ROOT_IDENTITY_PATH)
+                .await
+                .expect("storage")
+                .is_none(),
+            "the root identity must not survive a rolled-back init"
+        );
+        assert!(
+            storage
+                .get_by_path(INIT_PATH)
+                .await
+                .expect("storage")
+                .is_none(),
+            "the init config must not survive a rolled-back init"
+        );
+        assert!(
+            storage
+                .get_by_path(INIT_STAGING_PATH)
+                .await
+                .expect("storage")
+                .is_none(),
+            "the staging marker must be removed once cleanup succeeds"
+        );
+        assert!(
+            vault.seal.is_sealed().await,
+            "cleanup must clear the root key it installed for the account writes"
+        );
+
+        // And the vault is re-initialisable: the retry creates a clean enrollment and the
+        // shares it hands back open the vault and issue a credential for the named account.
+        let second = vault
+            .seal
+            .init(3, 2, "orphan-root", &vault.auth, &vault.mfa)
+            .await
+            .expect("a retry after a rolled-back init must succeed");
+        vault.seal.unseal(&second.keys[0]).await.expect("share one");
+        let complete = vault.seal.unseal(&second.keys[1]).await.expect("share two");
+        assert_eq!(
+            claims_of(&complete.root_token.expect("root credential"))["username"],
+            "orphan-root"
+        );
+        let totp_entries = storage
+            .inner
+            .list(
+                &secreton_storage::QueryParams::new()
+                    .with_path_prefix(crate::services::mfa_persistence::TOTP_PREFIX.to_string()),
+            )
+            .await
+            .expect("list");
+        assert_eq!(
+            totp_entries.len(),
+            1,
+            "the successful retry must leave exactly one TOTP enrollment, not the orphan plus a new one"
+        );
     }
 
     #[tokio::test]

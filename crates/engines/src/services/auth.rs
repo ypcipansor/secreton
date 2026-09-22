@@ -2891,11 +2891,13 @@ mod tests {
         // proves the flag is the boundary the denial stands on. The password is generated
         // per test rather than a literal: a fixed one is not a credential, but it reads
         // like one to a scanner and models production wrongly.
-        use rand::Rng;
-        let generated: String = rand::thread_rng()
-            .sample_iter(&rand::distributions::Alphanumeric)
-            .take(32)
-            .map(char::from)
+        let generated: String = crate::test_support::generated_password();
+        // The denial is not "this one known password is refused": it is that no password is
+        // accepted for this account. Probe with a spread of fresh random values plus the
+        // empty string, none of them a literal that reads like a committed credential.
+        let probes: Vec<String> = std::iter::once(String::new())
+            .chain(std::iter::once(generated.clone()))
+            .chain((0..3).map(|_| crate::test_support::generated_password()))
             .collect();
         // Control: the same password on an ordinary account really does log in, so a
         // denial below cannot be explained by a password nobody can use.
@@ -2968,7 +2970,7 @@ mod tests {
         let _ = root_key;
 
         // Every password-login entry point refuses it with the generic error.
-        for password in ["", "password", "changeme", "root", generated.as_str()] {
+        for password in probes.iter().map(String::as_str) {
             let login = service
                 .login(
                     ApiLoginRequest {
@@ -3035,10 +3037,11 @@ mod tests {
         let _env = crate::test_support::without_root_key();
         let (_storage, service, _root_key) = auth_with_open_barrier().await;
 
+        let ordinary_password = crate::test_support::generated_password();
         service
             .register_user(
                 "root",
-                "an-ordinary-admins-password",
+                &ordinary_password,
                 Some("ops@example.com".to_string()),
                 vec!["admin".to_string()],
                 vec![],
@@ -3048,7 +3051,7 @@ mod tests {
 
         assert!(
             service
-                .verify_password("root", "an-ordinary-admins-password")
+                .verify_password("root", &ordinary_password)
                 .await
                 .expect("verify"),
             "an ordinary admin account named 'root' is password-authenticatable"
@@ -3057,7 +3060,7 @@ mod tests {
             .login(
                 ApiLoginRequest {
                     username: "root".to_string(),
-                    password: "an-ordinary-admins-password".to_string(),
+                    password: ordinary_password.clone(),
                     mfa_code: None,
                 },
                 "192.0.2.1".to_string(),
@@ -3115,7 +3118,7 @@ mod tests {
         );
         assert!(
             !restarted
-                .verify_password(ROOT_USERNAME, "anything")
+                .verify_password(ROOT_USERNAME, &crate::test_support::generated_password())
                 .await
                 .expect("verify")
         );
