@@ -1,8 +1,9 @@
 use crate::services::crypto::CryptoService;
 use anyhow::{Result, anyhow};
+use chrono::Utc;
 use secreton_crypto::shamir::{self, Share};
 use secreton_crypto::{AlgorithmId, EncryptedData};
-use secreton_storage::{EncryptionMetadata, SecretEntry, SecurityLevel, StorageBackend};
+use secreton_storage::{EncryptionMetadata, Expect, SecretEntry, SecurityLevel, StorageBackend};
 use serde::{Deserialize, Serialize};
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -90,6 +91,40 @@ struct EncryptedRootKey {
 const INIT_PATH: &str = "sys/init";
 const ROOT_KEY_PATH: &str = "sys/root_key_enc";
 
+/// The cross-process initialization lease.
+///
+/// The in-process `init_lock` cannot protect a backend two replicas share: each replica
+/// holds its own mutex, so both pass the `is_initialized` guard during the same window and
+/// interleave their writes. This record is the authority that does hold across processes,
+/// and it works wherever the backend can perform an atomic
+/// [`StorageBackend::compare_and_set`]: acquiring it is insert-if-absent, so exactly one
+/// caller can hold it, and it carries an owner token and an expiry so a dead holder can be
+/// replaced without guessing.
+///
+/// It never holds key or share material — only the attempt token and a timestamp.
+const INIT_LEASE_PATH: &str = "sys/init_lease";
+
+/// How long a lease is valid before another attempt may replace it.
+///
+/// Generous enough for a slow Shamir split and TOTP enrollment on a loaded machine, short
+/// enough that a replica that died mid-initialization does not block recovery indefinitely.
+const INIT_LEASE_TTL_SECS: u64 = 300;
+
+/// What an attempt records at [`INIT_LEASE_PATH`].
+#[derive(Debug, Clone, Serialize, Deserialize)]
+struct InitLease {
+    /// The attempt that holds the lease. Opaque and random; an identifier, not a secret.
+    owner: String,
+    /// Unix seconds after which the lease may be replaced by another attempt.
+    expires_at: i64,
+}
+
+impl InitLease {
+    fn is_expired(&self, now: i64) -> bool {
+        self.expires_at <= now
+    }
+}
+
 /// Marker written first by `init` and removed only once every initialization artifact
 /// is stored. Its presence means an earlier `init` did not finish — whether it returned
 /// an error or the process died mid-way — and the next attempt must discard the partial
@@ -135,6 +170,12 @@ struct InitStaging {
     /// all present and correct, and cleanup must verify them rather than delete them.
     #[serde(default)]
     committed: bool,
+    /// The `init` attempt that owns this partial state, so rollback only ever removes
+    /// what that attempt wrote. Defaulted for markers written before this existed, which
+    /// then fail closed into the unowned path rather than being attributed to whoever
+    /// retries next.
+    #[serde(default)]
+    owner: Option<String>,
 }
 
 /// The username a vault initialised before [`ROOT_IDENTITY_PATH`] existed always used.
@@ -274,8 +315,41 @@ impl SealService {
         // recovery, the initialized guard, staging, the writes, commit and marker
         // removal. Locking only the guard would still let two calls interleave across the
         // writes and delete or overwrite each other's artifacts.
+        //
+        // This protects one process. The lease taken next is what extends the same
+        // guarantee to every other replica sharing this backend.
         let _init_guard = self.init_lock.lock().await;
 
+        // Take the cross-process lease before touching durable state, and never proceed
+        // without it. A backend that cannot arbitrate between processes returns
+        // `Unsupported` here rather than a lock that only appears to lock, and the caller
+        // fails closed: initializing on such a backend from two replicas is not something
+        // this can make safe, so it refuses instead of proceeding unsafely.
+        let lease = self.acquire_init_lease().await?;
+
+        let result = self
+            .init_under_lease(shares, threshold, root_username, auth, mfa, &lease)
+            .await;
+
+        // The lease is released on every path — success, failure and early return — but
+        // only if this attempt still owns it. A lease that expired and was legitimately
+        // taken over by another attempt must not be deleted by its former holder, which is
+        // what the ownership check inside `release_init_lease` enforces.
+        self.release_init_lease(&lease).await;
+
+        result
+    }
+
+    /// The body of [`Self::init`] with the lease already held.
+    async fn init_under_lease(
+        &self,
+        shares: u8,
+        threshold: u8,
+        root_username: &str,
+        auth: &crate::services::auth::AuthenticationService,
+        mfa: &secreton_auth::mfa::CombinedMfaService,
+        lease: &str,
+    ) -> Result<InitResponse> {
         // Recovery and the guard run under the lock, against a state neither call can
         // change from now on. `recover_partial_initialization` removes a partial attempt
         // before the initialized check, so a mid-initialisation vault can be retried; it
@@ -297,17 +371,128 @@ impl SealService {
         }
 
         let outcome = self
-            .initialize(shares, threshold, root_username, auth, mfa)
+            .initialize(shares, threshold, root_username, auth, mfa, lease)
             .await;
 
         match outcome {
             Ok(response) => Ok(response),
             Err(e) => {
                 // The caller gets the original error, but not before the partial state is
-                // removed so the next attempt starts clean. The lock is still held, so no
-                // concurrent attempt can be observing the state being rolled back.
+                // removed so the next attempt starts clean. The lock and the lease are
+                // still held, so no concurrent attempt can be observing the state being
+                // rolled back.
                 self.discard_partial_initialization().await;
                 Err(e)
+            }
+        }
+    }
+
+    /// Acquire the cross-process initialization lease and return its owner token.
+    ///
+    /// The acquire is an insert-if-absent on the lease path, which only one caller can win.
+    /// A lease that is already present but expired is replaced with an owner-conditional
+    /// write, so a replica that died mid-initialization does not block recovery forever and
+    /// does not have its live lease stolen by a replica that merely read a stale expiry.
+    ///
+    /// A backend that cannot arbitrate between processes is a hard error: proceeding would
+    /// reintroduce exactly the race the lease exists to close.
+    async fn acquire_init_lease(&self) -> Result<String> {
+        use secreton_storage::Coordination;
+
+        let owner = Uuid::new_v4().to_string();
+        let expires_at = Utc::now().timestamp() + INIT_LEASE_TTL_SECS as i64;
+
+        if self.storage.coordination() == Coordination::SingleProcess {
+            // A process-local backend cannot be shared between replicas at all — each one
+            // is a separate map — so the in-process lock already covers every caller that
+            // can reach this backend. There is nothing to take a lease against, and
+            // pretending otherwise would be the fake lock this refuses.
+            tracing::debug!(
+                "Initialization on a single-process backend: the in-process lock is the \
+                 complete guarantee, as no second replica can share this storage."
+            );
+            return Ok(owner);
+        }
+
+        let lease_entry = |owner: &str, expires_at: i64| {
+            SecretEntry::new(
+                INIT_LEASE_PATH.to_string(),
+                serde_json::to_vec(&InitLease {
+                    owner: owner.to_string(),
+                    expires_at,
+                })
+                .unwrap_or_default(),
+                EncryptionMetadata::default(),
+                SecurityLevel::Internal,
+                Uuid::nil(),
+            )
+            .owned_by(owner)
+        };
+
+        // First attempt: nobody holds it.
+        let acquired = self
+            .storage
+            .compare_and_set(&lease_entry(&owner, expires_at), Expect::Absent)
+            .await
+            .map_err(|e| anyhow!("Failed to acquire the initialization lease: {e}"))?;
+        if acquired {
+            return Ok(owner);
+        }
+
+        // Someone holds it. Replace it only if it has genuinely expired, and only via an
+        // ownership-conditional write against the token that is genuinely there — reading
+        // the record and then writing it unconditionally would race a live holder.
+        let existing = self
+            .storage
+            .get_by_path(INIT_LEASE_PATH)
+            .await
+            .map_err(|e| anyhow!("Failed to read the initialization lease: {e}"))?
+            .ok_or_else(|| {
+                anyhow!("the initialization lease vanished between acquiring and reading it")
+            })?;
+
+        let held: InitLease = serde_json::from_slice(&existing.encrypted_data)
+            .map_err(|e| anyhow!("corrupt initialization lease record: {e}"))?;
+
+        if !held.is_expired(Utc::now().timestamp()) {
+            return Err(anyhow!(
+                "another initialization is in progress on this backend; retry once it \
+                 completes or its lease expires"
+            ));
+        }
+
+        let taken_over = self
+            .storage
+            .compare_and_set(&lease_entry(&owner, expires_at), Expect::Owner(&held.owner))
+            .await
+            .map_err(|e| anyhow!("Failed to take over the expired initialization lease: {e}"))?;
+        if !taken_over {
+            return Err(anyhow!(
+                "another initialization took over the expired lease first; retry"
+            ));
+        }
+
+        tracing::warn!(
+            "Took over an expired initialization lease. The previous holder may have died \
+             mid-initialization; its partial state is discarded before this attempt writes."
+        );
+        Ok(owner)
+    }
+
+    /// Release the lease, but only while this attempt still owns it.
+    ///
+    /// A former holder whose lease expired and was taken over must not delete the new
+    /// holder's lease: that would reopen the window for a third caller while the second is
+    /// still initializing. `delete_owned` is conditional for exactly this reason.
+    async fn release_init_lease(&self, owner: &str) {
+        match self.storage.delete_owned(INIT_LEASE_PATH, owner).await {
+            Ok(_) => {}
+            Err(secreton_storage::StorageError::Unsupported { .. }) => {
+                // Single-process or otherwise incapable backend: there is no lease to
+                // release, and `acquire_init_lease` did not create one.
+            }
+            Err(e) => {
+                tracing::error!("Failed to release the initialization lease: {e}");
             }
         }
     }
@@ -322,6 +507,7 @@ impl SealService {
         root_username: &str,
         auth: &crate::services::auth::AuthenticationService,
         mfa: &secreton_auth::mfa::CombinedMfaService,
+        lease: &str,
     ) -> Result<InitResponse> {
         // 1. Generate Master Key (32 bytes)
         let master_key = secreton_crypto::generate_key(AlgorithmId::Aes256Gcm)?;
@@ -339,11 +525,15 @@ impl SealService {
             .map_err(|e| anyhow!("Shamir split failed: {}", e))?;
 
         // 5. Staging marker, before any durable artifact of this initialization.
-        self.write_staging(&InitStaging {
-            root_username: root_username.to_string(),
-            root_entity_id: None,
-            committed: false,
-        })
+        self.write_staging(
+            &InitStaging {
+                root_username: root_username.to_string(),
+                root_entity_id: None,
+                committed: false,
+                owner: Some(lease.to_string()),
+            },
+            lease,
+        )
         .await?;
 
         // 6. Store Init Config
@@ -351,13 +541,16 @@ impl SealService {
         let config_bytes = serde_json::to_vec(&config)?;
 
         self.storage
-            .store(&SecretEntry::new(
-                INIT_PATH.to_string(),
-                config_bytes,
-                EncryptionMetadata::default(),
-                SecurityLevel::Public,
-                Uuid::nil(),
-            ))
+            .store(
+                &SecretEntry::new(
+                    INIT_PATH.to_string(),
+                    config_bytes,
+                    EncryptionMetadata::default(),
+                    SecurityLevel::Public,
+                    Uuid::nil(),
+                )
+                .owned_by(lease),
+            )
             .await
             .map_err(|e| anyhow!("Failed to store init config: {}", e))?;
 
@@ -366,13 +559,16 @@ impl SealService {
             data: encrypted_root,
         })?;
         self.storage
-            .store(&SecretEntry::new(
-                ROOT_KEY_PATH.to_string(),
-                enc_root_bytes,
-                EncryptionMetadata::default(),
-                SecurityLevel::TopSecret,
-                Uuid::nil(),
-            ))
+            .store(
+                &SecretEntry::new(
+                    ROOT_KEY_PATH.to_string(),
+                    enc_root_bytes,
+                    EncryptionMetadata::default(),
+                    SecurityLevel::TopSecret,
+                    Uuid::nil(),
+                )
+                .owned_by(lease),
+            )
             .await
             .map_err(|e| anyhow!("Failed to store root key: {}", e))?;
 
@@ -432,11 +628,15 @@ impl SealService {
                     username: root_user.username.clone(),
                 };
 
-                self.write_staging(&InitStaging {
-                    root_username: identity.username.clone(),
-                    root_entity_id: Some(identity.id.clone()),
-                    committed: false,
-                })
+                self.write_staging(
+                    &InitStaging {
+                        root_username: identity.username.clone(),
+                        root_entity_id: Some(identity.id.clone()),
+                        committed: false,
+                        owner: Some(lease.to_string()),
+                    },
+                    lease,
+                )
                 .await?;
 
                 // Enable TOTP for Root
@@ -461,13 +661,16 @@ impl SealService {
         // names an account, it does not authenticate one.
         let bytes = serde_json::to_vec(&root_identity)?;
         self.storage
-            .store(&SecretEntry::new(
-                ROOT_IDENTITY_PATH.to_string(),
-                bytes,
-                EncryptionMetadata::default(),
-                SecurityLevel::Internal,
-                Uuid::nil(),
-            ))
+            .store(
+                &SecretEntry::new(
+                    ROOT_IDENTITY_PATH.to_string(),
+                    bytes,
+                    EncryptionMetadata::default(),
+                    SecurityLevel::Internal,
+                    Uuid::nil(),
+                )
+                .owned_by(lease),
+            )
             .await
             .map_err(|e| anyhow!("Failed to store root identity: {}", e))?;
 
@@ -475,11 +678,15 @@ impl SealService {
         // committed *before* removing it. If the process dies between the two, the marker
         // still says the vault finished — and recovery must verify and keep it rather than
         // delete a working vault.
-        self.write_staging(&InitStaging {
-            root_username: root_identity.username.clone(),
-            root_entity_id: Some(root_identity.id.clone()),
-            committed: true,
-        })
+        self.write_staging(
+            &InitStaging {
+                root_username: root_identity.username.clone(),
+                root_entity_id: Some(root_identity.id.clone()),
+                committed: true,
+                owner: Some(lease.to_string()),
+            },
+            lease,
+        )
         .await?;
 
         // Removing the marker is the last step and the only one whose failure does not
@@ -487,10 +694,10 @@ impl SealService {
         // below, and a later recovery recognises a committed marker and clears it. Failing
         // the whole call here would withhold the shares from the operator while leaving the
         // vault initialised — the one combination nobody can recover from.
-        if let Err(e) = self.storage.delete_by_path(INIT_STAGING_PATH).await {
+        if !self.remove_required(INIT_STAGING_PATH, Some(lease)).await {
             tracing::warn!(
-                "Initialization committed but its staging marker could not be removed \
-                 ({e}); recovery will verify and clear it on the next attempt."
+                "Initialization committed but its staging marker could not be removed; \
+                 recovery will verify and clear it on the next attempt."
             );
         }
 
@@ -514,18 +721,62 @@ impl SealService {
     /// portable — PostgreSQL refuses the second insert on its `UNIQUE(path)` constraint
     /// while the in-memory backend accepts it, so initialization failed on PostgreSQL and
     /// passed in every test that used memory.
-    async fn write_staging(&self, staging: &InitStaging) -> Result<()> {
+    async fn write_staging(&self, staging: &InitStaging, lease: &str) -> Result<()> {
         let bytes = serde_json::to_vec(staging)?;
-        self.storage
-            .upsert(&SecretEntry::new(
-                INIT_STAGING_PATH.to_string(),
-                bytes,
-                EncryptionMetadata::default(),
-                SecurityLevel::Internal,
-                Uuid::nil(),
-            ))
+        // `upsert` when no cross-process peer can exist; the owner-conditional
+        // `compare_and_set` otherwise. On a shared backend an unconditional upsert would
+        // let an attempt whose lease has expired overwrite the record a newer attempt now
+        // owns, so the write is made conditional on still owning it and a lost lease is
+        // surfaced as an error rather than publishing state this attempt cannot defend.
+        let entry = SecretEntry::new(
+            INIT_STAGING_PATH.to_string(),
+            bytes,
+            EncryptionMetadata::default(),
+            SecurityLevel::Internal,
+            Uuid::nil(),
+        )
+        .owned_by(lease);
+
+        if self.storage.coordination() == secreton_storage::Coordination::SingleProcess {
+            return self
+                .storage
+                .upsert(&entry)
+                .await
+                .map_err(|e| anyhow!("Failed to record initialization progress: {}", e));
+        }
+
+        // Pick the atomic precondition from what is currently at the path. The read chooses
+        // between insert-if-absent and owner-conditional replace; it never performs the
+        // write, so a takeover between the read and the write is still caught by the
+        // backend's own comparison rather than by this call's stale view.
+        let existing = self
+            .storage
+            .get_by_path(INIT_STAGING_PATH)
             .await
-            .map_err(|e| anyhow!("Failed to record initialization progress: {}", e))
+            .map_err(|e| anyhow!("Failed to read initialization progress: {e}"))?;
+
+        let expect = match &existing {
+            None => secreton_storage::Expect::Absent,
+            Some(record) if record.has_owner(lease) => secreton_storage::Expect::Owner(lease),
+            Some(_) => {
+                return Err(anyhow!(
+                    "another initialization owns the staging marker; refusing to overwrite it"
+                ));
+            }
+        };
+
+        let written = self
+            .storage
+            .compare_and_set(&entry, expect)
+            .await
+            .map_err(|e| anyhow!("Failed to record initialization progress: {}", e))?;
+        if !written {
+            return Err(anyhow!(
+                "this initialization no longer owns its staging marker; another attempt \
+                 has taken over"
+            ));
+        }
+        Ok(())
     }
 
     /// Bring a vault that an interrupted `init` left behind to a state a retry can start
@@ -559,12 +810,18 @@ impl SealService {
                      be openable by its shares"
                 ));
             }
-            self.storage
-                .delete_by_path(INIT_STAGING_PATH)
+            // `delete_by_path`'s `Ok(false)` only means "no record was there"; a backend
+            // that failed to remove a record it did have reports the same value, so the
+            // removal is verified rather than trusted.
+            if !self
+                .remove_required(INIT_STAGING_PATH, staging.owner.as_deref())
                 .await
-                .map_err(|e| {
-                    anyhow!("Failed to clear the committed initialization staging marker: {e}")
-                })?;
+            {
+                return Err(anyhow!(
+                    "the committed initialization staging marker could not be removed; \
+                     retry once storage is healthy"
+                ));
+            }
             tracing::info!(
                 "Completed a previously committed initialization whose staging marker \
                  removal had failed."
@@ -659,9 +916,16 @@ impl SealService {
             && staging.committed
         {
             self.crypto.clear_root_key().await;
-            return self.remove_required(INIT_STAGING_PATH).await;
+            return self
+                .remove_required(INIT_STAGING_PATH, staging.owner.as_deref())
+                .await;
         }
 
+        // A partial attempt. Only the artifacts it owns may be removed; anything written by
+        // another attempt (a marker whose owner is different, or a path with no owner token
+        // authored by this repository before tokens existed) is left alone. Cleanup is
+        // scoped by ownership precisely so a stale cleanup cannot delete a newer attempt's
+        // work.
         if let Some(staging) = &staging {
             if let Some(entity_id) = &staging.root_entity_id {
                 let totp_path = format!(
@@ -669,24 +933,29 @@ impl SealService {
                     crate::services::mfa_persistence::TOTP_PREFIX,
                     entity_id
                 );
-                all_removed &= self.remove_required(&totp_path).await;
+                all_removed &= self
+                    .remove_required(&totp_path, staging.owner.as_deref())
+                    .await;
             }
             let user_path = format!(
                 "{}{}",
                 crate::services::auth::USER_STORAGE_PREFIX,
                 staging.root_username
             );
-            all_removed &= self.remove_required(&user_path).await;
+            all_removed &= self
+                .remove_required(&user_path, staging.owner.as_deref())
+                .await;
         }
 
+        let owner = staging.as_ref().and_then(|s| s.owner.as_deref());
         for path in [ROOT_IDENTITY_PATH, ROOT_KEY_PATH, INIT_PATH] {
-            all_removed &= self.remove_required(path).await;
+            all_removed &= self.remove_required(path, owner).await;
         }
 
         // The marker goes last, and only once every artifact is gone. If anything above
         // failed, leaving it is exactly what lets the next attempt retry the cleanup.
         if all_removed {
-            all_removed = self.remove_required(INIT_STAGING_PATH).await;
+            all_removed = self.remove_required(INIT_STAGING_PATH, owner).await;
         } else {
             tracing::error!(
                 "Not removing the initialization staging marker: an artifact could not be \
@@ -701,11 +970,83 @@ impl SealService {
         all_removed
     }
 
-    /// Delete a path, treating absence as success and a failure as a failure.
+    /// Delete a path and only report success once the path is verifiably gone.
     ///
-    /// Returns whether the path is now gone. This is the only place cleanup decides, so
-    /// "log and carry on" cannot come back by accident.
-    async fn remove_required(&self, path: &str) -> bool {
+    /// `Ok(false)` from a backend means "no record was there to delete", which is success
+    /// for an idempotent cleanup — but it must never be *trusted* without a read-back,
+    /// because a backend whose delete silently did nothing would report the same value as
+    /// one with nothing to do. Every removal is therefore followed by a read: the path must
+    /// be absent, or the removal is a failure and the marker stays so a retry can finish.
+    ///
+    /// When `owner` is `Some`, a record that exists but carries a different owner token is
+    /// left in place and reported as success — it belongs to an attempt that is not this
+    /// one. That is what stops a stale cleanup from deleting a newer attempt's artifacts.
+    async fn remove_required(&self, path: &str, owner: Option<&str>) -> bool {
+        // Ownership-scoped removal where a token is known and the backend can express it.
+        // A single-process backend has no peers, so ownership is moot and a plain delete is
+        // the whole operation.
+        let scoped = owner.is_some()
+            && self.storage.coordination() != secreton_storage::Coordination::SingleProcess;
+
+        if let Some(owner) = owner.filter(|_| scoped) {
+            match self.storage.delete_owned(path, owner).await {
+                Ok(true) => {}
+                Ok(false) => {
+                    // Either the path is already gone, or the record belongs to another
+                    // owner. Both are "leave it alone"; the read-back below distinguishes
+                    // them from a delete that silently failed.
+                }
+                Err(secreton_storage::StorageError::Unsupported { .. }) => {
+                    // The backend cannot delete conditionally. Fall through to the
+                    // unconditional delete, which the read-back still verifies.
+                    if !self.delete_unconditionally(path).await {
+                        return false;
+                    }
+                }
+                Err(e) => {
+                    tracing::error!(
+                        "Failed to remove '{}' during cleanup of an incomplete \
+                         initialization: {}",
+                        path,
+                        e
+                    );
+                    return false;
+                }
+            }
+        } else if !self.delete_unconditionally(path).await {
+            return false;
+        }
+
+        // Read back. The record must be gone, or belong to another owner; anything else
+        // means the delete did not take effect and the caller must not continue as though
+        // it had.
+        match self.storage.get_by_path(path).await {
+            Ok(None) => true,
+            Ok(Some(record)) => match (owner, record.owner_token()) {
+                (Some(owner), Some(record_owner)) if record_owner != owner => true,
+                _ => {
+                    tracing::error!(
+                        "Delete of '{}' during cleanup reported success but the record is \
+                         still present; keeping the staging marker so a retry can finish \
+                         the cleanup.",
+                        path
+                    );
+                    false
+                }
+            },
+            Err(e) => {
+                tracing::error!(
+                    "Could not verify removal of '{}' during cleanup: {}",
+                    path,
+                    e
+                );
+                false
+            }
+        }
+    }
+
+    /// Delete without an ownership precondition, treating absence as success.
+    async fn delete_unconditionally(&self, path: &str) -> bool {
         match self.storage.delete_by_path(path).await {
             Ok(_) => true,
             Err(e) => {
@@ -2223,6 +2564,7 @@ mod tests {
             root_username: root_username.to_string(),
             root_entity_id,
             committed: false,
+            owner: None,
         })
         .expect("serialise staging");
         storage
@@ -2752,6 +3094,7 @@ mod tests {
             root_username: "crashed-root".to_string(),
             root_entity_id: None,
             committed: false,
+            owner: None,
         })
         .expect("serialise staging");
         storage
@@ -2791,5 +3134,447 @@ mod tests {
             .root_token
             .expect("the recovered initialization must issue a bootstrap credential");
         assert_eq!(claims_of(&token)["username"], "crash-recovered-root");
+    }
+
+    /// A backend whose `delete_by_path` reports `Ok(false)` — "nothing was there" — while
+    /// leaving the record in place, and whose `delete_owned` is unsupported.
+    ///
+    /// This is the exact shape the old `remove_required` trusted: it read `Ok(_)` as
+    /// success, so a backend that silently declined to delete looked identical to one with
+    /// nothing to delete, and cleanup removed the marker over a still-present artifact.
+    /// It is one-shot so the test can then prove the retry succeeds.
+    #[derive(Debug)]
+    struct SilentDeleteFailure {
+        inner: MemoryBackend,
+        path: String,
+        armed: std::sync::atomic::AtomicBool,
+        fired: std::sync::atomic::AtomicBool,
+    }
+
+    impl SilentDeleteFailure {
+        fn arming(path: &str) -> Self {
+            Self {
+                inner: MemoryBackend::new(),
+                path: path.to_string(),
+                armed: std::sync::atomic::AtomicBool::new(true),
+                fired: std::sync::atomic::AtomicBool::new(false),
+            }
+        }
+    }
+
+    #[async_trait::async_trait]
+    impl StorageBackend for SilentDeleteFailure {
+        async fn store(&self, entry: &SecretEntry) -> StorageResult<()> {
+            self.inner.store(entry).await
+        }
+        async fn get_by_id(&self, id: Uuid) -> StorageResult<Option<SecretEntry>> {
+            self.inner.get_by_id(id).await
+        }
+        async fn get_by_path(&self, path: &str) -> StorageResult<Option<SecretEntry>> {
+            self.inner.get_by_path(path).await
+        }
+        async fn update(&self, entry: &SecretEntry) -> StorageResult<()> {
+            self.inner.update(entry).await
+        }
+        async fn upsert(&self, entry: &SecretEntry) -> StorageResult<()> {
+            self.inner.upsert(entry).await
+        }
+        async fn delete_by_id(&self, id: Uuid) -> StorageResult<bool> {
+            self.inner.delete_by_id(id).await
+        }
+        async fn delete_by_path(&self, path: &str) -> StorageResult<bool> {
+            if path == self.path && self.armed.swap(false, std::sync::atomic::Ordering::SeqCst) {
+                self.fired.store(true, std::sync::atomic::Ordering::SeqCst);
+                // Claims nothing was there, while the record stays. The whole point.
+                return Ok(false);
+            }
+            self.inner.delete_by_path(path).await
+        }
+        async fn delete_owned(&self, _path: &str, _token: &str) -> StorageResult<bool> {
+            // No conditional delete capability, so cleanup must fall back to the
+            // unconditional path — and still verify it with a read-back.
+            Err(secreton_storage::StorageError::Unsupported {
+                operation: "delete_owned".to_string(),
+                backend: "silent-delete-failure".to_string(),
+            })
+        }
+        async fn list(
+            &self,
+            params: &secreton_storage::QueryParams,
+        ) -> StorageResult<Vec<SecretEntry>> {
+            self.inner.list(params).await
+        }
+        async fn count(&self, params: &secreton_storage::QueryParams) -> StorageResult<u64> {
+            self.inner.count(params).await
+        }
+        async fn exists(&self, path: &str) -> StorageResult<bool> {
+            self.inner.exists(path).await
+        }
+        async fn begin_transaction(
+            &self,
+        ) -> StorageResult<Box<dyn secreton_storage::StorageTransaction>> {
+            self.inner.begin_transaction().await
+        }
+        async fn health_check(&self) -> StorageResult<secreton_storage::HealthStatus> {
+            self.inner.health_check().await
+        }
+        async fn get_stats(&self) -> StorageResult<secreton_storage::StorageStats> {
+            self.inner.get_stats().await
+        }
+        async fn migrate(&self) -> StorageResult<()> {
+            self.inner.migrate().await
+        }
+        async fn compact(&self) -> StorageResult<()> {
+            self.inner.compact().await
+        }
+        async fn vacuum(&self) -> StorageResult<()> {
+            self.inner.vacuum().await
+        }
+        async fn delete_expired(&self, path_prefix: Option<String>) -> StorageResult<u64> {
+            self.inner.delete_expired(path_prefix).await
+        }
+        async fn store_oauth_state(
+            &self,
+            state: &secreton_domain::OAuthState,
+        ) -> StorageResult<()> {
+            self.inner.store_oauth_state(state).await
+        }
+        async fn get_oauth_state(
+            &self,
+            state: &str,
+        ) -> StorageResult<Option<secreton_domain::OAuthState>> {
+            self.inner.get_oauth_state(state).await
+        }
+        async fn delete_expired_oauth_states(&self) -> StorageResult<u64> {
+            self.inner.delete_expired_oauth_states().await
+        }
+    }
+
+    #[tokio::test]
+    async fn a_delete_that_reports_false_while_keeping_the_record_keeps_the_marker() {
+        // Regression: `remove_required` treated any `Ok(_)` from `delete_by_path` as
+        // success, including `Ok(false)`. A backend that reports "nothing was there" while
+        // keeping the record — which is exactly what the Redis backend answered for every
+        // path-keyed delete before this was fixed — let cleanup delete the staging marker
+        // over an artifact that was still present. The next attempt then saw no marker,
+        // skipped cleanup, and read the leftover init config as a finished initialization.
+        //
+        // The property: a removal that does not actually remove is a failure, the marker
+        // survives, and the retry does not start on top of stale state.
+        let _env = crate::test_support::without_root_key();
+        let storage = Arc::new(SilentDeleteFailure::arming(INIT_PATH));
+        let vault = sealed_vault_with_storage(storage.clone()).await;
+
+        // A crashed init left the config and the marker behind.
+        let storage_dyn: Arc<dyn StorageBackend + Send + Sync> = storage.clone();
+        store_partial_init(&storage_dyn, "silent-delete-root", None).await;
+
+        let first = vault
+            .seal
+            .init(3, 2, "silent-delete-root", &vault.auth, &vault.mfa)
+            .await;
+        assert!(
+            storage.fired.load(std::sync::atomic::Ordering::SeqCst),
+            "the silent-delete fault must actually have fired, or this test proves nothing"
+        );
+        assert!(
+            first.is_err(),
+            "cleanup must not report success when the artifact is still present"
+        );
+        assert!(
+            storage
+                .get_by_path(INIT_PATH)
+                .await
+                .expect("storage")
+                .is_some(),
+            "the artifact the delete did not remove must still be there"
+        );
+        assert!(
+            storage
+                .get_by_path(INIT_STAGING_PATH)
+                .await
+                .expect("storage")
+                .is_some(),
+            "the marker must survive so the next attempt retries the cleanup"
+        );
+
+        // The fault is one-shot; the retry removes the artifact for real and initialises.
+        let second = vault
+            .seal
+            .init(3, 2, "silent-delete-root", &vault.auth, &vault.mfa)
+            .await
+            .expect("the retry must clear the stale state and initialise");
+        vault.seal.unseal(&second.keys[0]).await.expect("share one");
+        let complete = vault.seal.unseal(&second.keys[1]).await.expect("share two");
+        assert_eq!(
+            claims_of(&complete.root_token.expect("root credential"))["username"],
+            "silent-delete-root"
+        );
+        assert!(
+            storage
+                .get_by_path(INIT_STAGING_PATH)
+                .await
+                .expect("storage")
+                .is_none(),
+            "a successful retry must not leave its staging marker behind"
+        );
+    }
+
+    /// One in-memory store shared by two `SealService` instances, presented as a
+    /// cross-process backend.
+    ///
+    /// `MemoryBackend` reports `Coordination::SingleProcess` because two instances are two
+    /// separate maps — so two `SealService`s over one `MemoryBackend` would be modelling a
+    /// shared backend while the service correctly decides it is not shareable. This double
+    /// wraps *one* map in an `Arc` and reports `Coordination::CrossProcess`, so the two
+    /// services really do contend over the same records and the lease path is exercised.
+    /// `compare_and_set` and `delete_owned` delegate to the inner map, which performs them
+    /// under its own lock — atomic, which is what the backend contract requires.
+    ///
+    /// It also parks the first write to a watched path so a test can force the overlap
+    /// deterministically rather than by timing.
+    #[derive(Debug)]
+    struct SharedCrossProcessBackend {
+        inner: Arc<MemoryBackend>,
+        pause_on: String,
+        reached: tokio::sync::Notify,
+        resume: tokio::sync::Notify,
+        started: std::sync::atomic::AtomicUsize,
+    }
+
+    impl SharedCrossProcessBackend {
+        fn new(pause_on: &str) -> Self {
+            Self {
+                inner: Arc::new(MemoryBackend::new()),
+                pause_on: pause_on.to_string(),
+                reached: tokio::sync::Notify::new(),
+                resume: tokio::sync::Notify::new(),
+                started: std::sync::atomic::AtomicUsize::new(0),
+            }
+        }
+
+        async fn maybe_pause(&self, path: &str) {
+            if path == self.pause_on
+                && self
+                    .started
+                    .fetch_add(1, std::sync::atomic::Ordering::SeqCst)
+                    == 0
+            {
+                self.reached.notify_one();
+                self.resume.notified().await;
+            }
+        }
+    }
+
+    #[async_trait::async_trait]
+    impl StorageBackend for SharedCrossProcessBackend {
+        fn coordination(&self) -> secreton_storage::Coordination {
+            secreton_storage::Coordination::CrossProcess
+        }
+        async fn store(&self, entry: &SecretEntry) -> StorageResult<()> {
+            self.maybe_pause(&entry.path).await;
+            self.inner.store(entry).await
+        }
+        async fn get_by_id(&self, id: Uuid) -> StorageResult<Option<SecretEntry>> {
+            self.inner.get_by_id(id).await
+        }
+        async fn get_by_path(&self, path: &str) -> StorageResult<Option<SecretEntry>> {
+            self.inner.get_by_path(path).await
+        }
+        async fn update(&self, entry: &SecretEntry) -> StorageResult<()> {
+            self.inner.update(entry).await
+        }
+        async fn upsert(&self, entry: &SecretEntry) -> StorageResult<()> {
+            self.maybe_pause(&entry.path).await;
+            self.inner.upsert(entry).await
+        }
+        async fn delete_by_id(&self, id: Uuid) -> StorageResult<bool> {
+            self.inner.delete_by_id(id).await
+        }
+        async fn delete_by_path(&self, path: &str) -> StorageResult<bool> {
+            self.inner.delete_by_path(path).await
+        }
+        async fn compare_and_set(
+            &self,
+            entry: &SecretEntry,
+            expect: Expect<'_>,
+        ) -> StorageResult<bool> {
+            // The staging write goes through this path on a cross-process backend, so the
+            // pause has to be here for a test to park an attempt inside its write sequence.
+            self.maybe_pause(&entry.path).await;
+            self.inner.compare_and_set(entry, expect).await
+        }
+        async fn delete_owned(&self, path: &str, token: &str) -> StorageResult<bool> {
+            self.inner.delete_owned(path, token).await
+        }
+        async fn list(
+            &self,
+            params: &secreton_storage::QueryParams,
+        ) -> StorageResult<Vec<SecretEntry>> {
+            self.inner.list(params).await
+        }
+        async fn count(&self, params: &secreton_storage::QueryParams) -> StorageResult<u64> {
+            self.inner.count(params).await
+        }
+        async fn exists(&self, path: &str) -> StorageResult<bool> {
+            self.inner.exists(path).await
+        }
+        async fn begin_transaction(
+            &self,
+        ) -> StorageResult<Box<dyn secreton_storage::StorageTransaction>> {
+            self.inner.begin_transaction().await
+        }
+        async fn health_check(&self) -> StorageResult<secreton_storage::HealthStatus> {
+            self.inner.health_check().await
+        }
+        async fn get_stats(&self) -> StorageResult<secreton_storage::StorageStats> {
+            self.inner.get_stats().await
+        }
+        async fn migrate(&self) -> StorageResult<()> {
+            self.inner.migrate().await
+        }
+        async fn compact(&self) -> StorageResult<()> {
+            self.inner.compact().await
+        }
+        async fn vacuum(&self) -> StorageResult<()> {
+            self.inner.vacuum().await
+        }
+        async fn delete_expired(&self, path_prefix: Option<String>) -> StorageResult<u64> {
+            self.inner.delete_expired(path_prefix).await
+        }
+        async fn store_oauth_state(
+            &self,
+            state: &secreton_domain::OAuthState,
+        ) -> StorageResult<()> {
+            self.inner.store_oauth_state(state).await
+        }
+        async fn get_oauth_state(
+            &self,
+            state: &str,
+        ) -> StorageResult<Option<secreton_domain::OAuthState>> {
+            self.inner.get_oauth_state(state).await
+        }
+        async fn delete_expired_oauth_states(&self) -> StorageResult<u64> {
+            self.inner.delete_expired_oauth_states().await
+        }
+    }
+
+    #[tokio::test]
+    async fn two_service_instances_sharing_a_backend_admit_exactly_one_winner() {
+        // Regression (severe, cross-process): `init_lock` is a mutex inside one process.
+        // Two replicas sharing a backend each hold their own, so neither is excluded by the
+        // other, both pass the `is_initialized` guard, and they interleave their staging,
+        // recovery and commit — one caller receiving shares that do not open the root key
+        // that ended up stored. The lease at `INIT_LEASE_PATH` is the cross-process
+        // authority: this test uses two *separate* `SealService` instances over one shared
+        // backend, each with its own `init_lock`, so only the lease can serialise them.
+        //
+        // The overlap is forced: instance A is parked inside its first staging write — past
+        // the guard, holding the lease — while instance B runs to completion. B must be
+        // refused rather than interleaved, must not remove A's artifacts, and A's shares
+        // must open the root key that is actually stored.
+        let _env = crate::test_support::without_root_key();
+        let storage = Arc::new(SharedCrossProcessBackend::new(INIT_PATH));
+        let storage_dyn: Arc<dyn StorageBackend + Send + Sync> = storage.clone();
+
+        // Two independent service graphs over the same records, as two replicas would be.
+        let replica_a = Arc::new(sealed_vault_with_storage(storage_dyn.clone()).await);
+        let replica_b = Arc::new(sealed_vault_with_storage(storage_dyn.clone()).await);
+
+        let first = {
+            let replica_a = replica_a.clone();
+            tokio::spawn(async move {
+                replica_a
+                    .seal
+                    .init(3, 2, "winner-root", &replica_a.auth, &replica_a.mfa)
+                    .await
+            })
+        };
+
+        // A is inside its staging write, holding the cross-process lease. B must not win.
+        storage.reached.notified().await;
+        let loser = replica_b
+            .seal
+            .init(3, 2, "loser-root", &replica_b.auth, &replica_b.mfa)
+            .await;
+        assert!(
+            loser.is_err(),
+            "the second replica must be refused while the first holds the lease, not \
+             initialise in parallel"
+        );
+
+        // B did not remove what A had already written.
+        assert!(
+            storage
+                .get_by_path(INIT_STAGING_PATH)
+                .await
+                .expect("storage")
+                .is_some(),
+            "the loser must not delete the winner's staging marker"
+        );
+
+        // Let A finish; it is the single winner.
+        storage.resume.notify_one();
+        let winner = first
+            .await
+            .expect("the winner task must not panic")
+            .expect("the lease holder must complete its initialization");
+
+        // Exactly one winner: the vault is initialized once, names the winner's account,
+        // and carries no staging marker.
+        assert!(replica_a.seal.is_initialized().await);
+        assert!(
+            storage
+                .get_by_path(INIT_STAGING_PATH)
+                .await
+                .expect("storage")
+                .is_none(),
+            "the winner must not leave a staging marker"
+        );
+        let identity: RootIdentity = serde_json::from_slice(
+            &storage
+                .get_by_path(ROOT_IDENTITY_PATH)
+                .await
+                .expect("storage")
+                .expect("the winner must have persisted a root identity")
+                .encrypted_data,
+        )
+        .expect("root identity parses");
+        assert_eq!(
+            identity.username, "winner-root",
+            "the stored root identity must be the winner's, not the loser's"
+        );
+
+        // The winner's shares open the stored root key: unseal mints a credential naming
+        // the account the winner created. This is the property a cross-replica race
+        // destroys — shares handed out that do not open the key that ended up stored.
+        let complete = {
+            let replica_a = replica_a.clone();
+            let key = winner.keys[0].clone();
+            let key2 = winner.keys[1].clone();
+            async move {
+                replica_a.seal.unseal(&key).await.expect("share one");
+                replica_a
+                    .seal
+                    .unseal(&key2)
+                    .await
+                    .expect("the winner's shares must open the stored root key")
+            }
+        }
+        .await;
+        let token = complete
+            .root_token
+            .expect("the winner's vault must issue a bootstrap credential");
+        assert_eq!(claims_of(&token)["username"], "winner-root");
+
+        // The lease was released, so a later attempt is not blocked by a stale record.
+        assert!(
+            storage
+                .get_by_path(INIT_LEASE_PATH)
+                .await
+                .expect("storage")
+                .is_none(),
+            "a completed initialization must release its lease"
+        );
     }
 }

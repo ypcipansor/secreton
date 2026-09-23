@@ -145,6 +145,67 @@ impl SecretEntry {
         }
         self
     }
+
+    /// Tag this entry with the identifier of the operation that owns it.
+    ///
+    /// Used by [`StorageBackend::compare_and_set`] and
+    /// [`StorageBackend::delete_owned`] as the fencing token: a conditional write or a
+    /// conditional delete only applies while the record still carries this value. The
+    /// token identifies an attempt, never a user, secret or credential, and is stored in
+    /// the entry's ordinary metadata map so every backend already persists it.
+    pub fn owned_by(mut self, token: &str) -> Self {
+        self.metadata
+            .insert(OWNER_TOKEN_KEY.to_string(), token.to_string());
+        self
+    }
+
+    /// The owner token recorded by [`Self::owned_by`], if any.
+    pub fn owner_token(&self) -> Option<&str> {
+        self.metadata.get(OWNER_TOKEN_KEY).map(String::as_str)
+    }
+
+    /// Whether this entry is owned by `token`.
+    pub fn has_owner(&self, token: &str) -> bool {
+        self.owner_token() == Some(token)
+    }
+}
+
+/// Metadata key under which [`SecretEntry::owned_by`] records its owner token.
+pub const OWNER_TOKEN_KEY: &str = "storage_owner";
+
+/// Precondition for [`StorageBackend::compare_and_set`].
+///
+/// The three variants are the whole contract: a caller states what must already be true
+/// at the path, and the backend performs the check and the write as one indivisible step.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Expect<'a> {
+    /// No record may exist at the path. This is insert-if-absent.
+    Absent,
+    /// The record at the path must carry this exact owner token.
+    Owner(&'a str),
+    /// No precondition. The write is still a single atomic replacement, which is what
+    /// distinguishes it from a read followed by a separate `store`.
+    Any,
+}
+
+/// What coordination a backend can actually provide between callers.
+///
+/// This is a property of the backend, not a configuration knob, and it is what lets the
+/// seal service decide whether an operation needs a cross-process lease or can rely on its
+/// in-process mutex alone. A durable backend that two replicas may share must report
+/// [`Coordination::CrossProcess`] and implement [`StorageBackend::compare_and_set`] and
+/// [`StorageBackend::delete_owned`] for real; a backend that is inherently process-local
+/// reports [`Coordination::SingleProcess`], and the caller treats its in-process lock as
+/// the whole guarantee rather than inventing a fake cross-process one.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Coordination {
+    /// Guarantees hold only within one process. Every `MemoryBackend` is a distinct map
+    /// and the single-node Raft state machine lives in memory, so neither can be shared
+    /// between replicas at all.
+    SingleProcess,
+    /// The backend can arbitrate between processes that share it, through
+    /// `compare_and_set`/`delete_owned`. Durable stores fall here.
+    CrossProcess,
 }
 
 impl Default for EncryptionMetadata {
@@ -242,6 +303,81 @@ impl QueryParams {
         self.limit = Some(limit);
         self
     }
+
+    /// Apply this query's filters, sort and pagination to an in-memory slice.
+    ///
+    /// A backend that cannot express a filter server-side (Redis enumerates by scanning)
+    /// uses this so its results match the backends that can, rather than returning
+    /// everything and leaving the caller to notice.
+    pub fn apply_to(&self, mut entries: Vec<SecretEntry>) -> Vec<SecretEntry> {
+        entries.retain(|entry| {
+            if let Some(prefix) = &self.path_prefix
+                && !entry.path.starts_with(prefix)
+            {
+                return false;
+            }
+            if self
+                .excluded_path_prefixes
+                .iter()
+                .any(|p| entry.path.starts_with(p))
+            {
+                return false;
+            }
+            if let Some(min_level) = self.security_level
+                && entry.security_level < min_level
+            {
+                return false;
+            }
+            if !self.tags.is_empty() {
+                let entry_tags: std::collections::HashSet<_> = entry.tags.iter().collect();
+                let filter_tags: std::collections::HashSet<_> = self.tags.iter().collect();
+                if !filter_tags.is_subset(&entry_tags) {
+                    return false;
+                }
+            }
+            if let Some(owner_id) = self.owner_id
+                && entry.owner_id != owner_id
+            {
+                return false;
+            }
+            for (key, value) in &self.metadata_filters {
+                if entry.metadata.get(key) != Some(value) {
+                    return false;
+                }
+            }
+            if !self.include_expired && entry.is_expired() {
+                return false;
+            }
+            true
+        });
+
+        if let Some(sort_by) = &self.sort_by {
+            let descending = self
+                .sort_order
+                .as_deref()
+                .is_some_and(|o| o.eq_ignore_ascii_case("desc"));
+            let key = |entry: &SecretEntry| match sort_by.as_str() {
+                "path" => entry.path.clone(),
+                "created_at" => entry.created_at.to_rfc3339(),
+                "updated_at" => entry.updated_at.to_rfc3339(),
+                "security_level" => (entry.security_level as i32).to_string(),
+                other => entry.metadata.get(other).cloned().unwrap_or_default(),
+            };
+            entries.sort_by_key(key);
+            if descending {
+                entries.reverse();
+            }
+        }
+
+        let offset = self.offset.unwrap_or(0) as usize;
+        if offset > 0 {
+            entries.drain(..offset.min(entries.len()));
+        }
+        if let Some(limit) = self.limit {
+            entries.truncate(limit as usize);
+        }
+        entries
+    }
 }
 
 /// Storage operation errors
@@ -279,6 +415,14 @@ pub enum StorageError {
 
     #[error("Migration error: {message}")]
     MigrationError { message: String },
+
+    /// The backend cannot provide an operation with the guarantee its contract names.
+    ///
+    /// Returned instead of silently degrading, so a caller that needs atomicity or
+    /// cross-process coordination fails loudly rather than building on a promise the
+    /// backend did not keep.
+    #[error("Unsupported operation: {operation} is not supported by the {backend} backend")]
+    Unsupported { operation: String, backend: String },
 }
 
 // impl From<azure_storage::Error> for StorageError {
@@ -347,8 +491,74 @@ pub trait StorageBackend: std::fmt::Debug + Send + Sync {
     /// Delete a secreton entry by ID
     async fn delete_by_id(&self, id: Uuid) -> StorageResult<bool>;
 
-    /// Delete a secreton entry by path
+    /// What coordination this backend can provide between separate processes.
+    ///
+    /// Callers that need cross-process serialisation — initialization on a durable backend
+    /// two replicas may share — must consult this and refuse to proceed when it is
+    /// [`Coordination::SingleProcess`], rather than trusting an in-process mutex that the
+    /// other replica does not hold. See [`Coordination`].
+    fn coordination(&self) -> Coordination {
+        Coordination::SingleProcess
+    }
+
+    /// Delete a secreton entry by path.
+    ///
+    /// The `bool` answers exactly one question: **did a record at this path exist and get
+    /// removed by this call?** `Ok(true)` means this call removed it; `Ok(false)` means no
+    /// record was there to remove. It is not a statement that the path is now absent: a
+    /// backend that attempts the removal but fails reports the same `false` as one that
+    /// found nothing. A caller that needs "the path is now gone" must read it back rather
+    /// than trust `false`; a caller that needs "my record was removed" must use
+    /// [`Self::delete_owned`], which is conditional and therefore meaningful even when
+    /// this operation cannot report what happened.
     async fn delete_by_path(&self, path: &str) -> StorageResult<bool>;
+
+    /// Atomically write `entry` at its path, but only if `expect` still holds.
+    ///
+    /// This is the compare-and-set the trait otherwise lacks. It is expressed with an
+    /// explicit precondition so a caller can build an inter-process lock or a fenced
+    /// update without a read-then-write window: `Expect::Absent` is insert-if-absent,
+    /// `Expect::Owner(token)` is "replace the record I still own".
+    ///
+    /// Returns `Ok(true)` when the write happened and `Ok(false)` when the precondition
+    /// did not hold — the caller lost the race and must not treat its own state as
+    /// committed. An error is a real storage failure, not a lost race.
+    ///
+    /// The default implementation is deliberately **not** atomic and refuses the two uses
+    /// that need atomicity, because a silently non-atomic default is how a fake lock
+    /// ships. Backends that can make the operation genuinely indivisible override this;
+    /// the ones that cannot return [`StorageError::Unsupported`], and callers that require
+    /// coordination must treat that as a hard stop rather than fall back.
+    async fn compare_and_set(
+        &self,
+        entry: &SecretEntry,
+        expect: Expect<'_>,
+    ) -> StorageResult<bool> {
+        let _ = (entry, expect);
+        Err(StorageError::Unsupported {
+            operation: "compare_and_set".to_string(),
+            backend: "default".to_string(),
+        })
+    }
+
+    /// Delete the record at `path`, but only while it is still owned by `token`.
+    ///
+    /// Rollback and cleanup must never delete an artifact another attempt now owns, and a
+    /// path that has since been rewritten by someone else must survive. Returns
+    /// `Ok(true)` only when this call removed a record still carrying `token`;
+    /// `Ok(false)` means the record was absent *or* no longer owned by `token`, and in
+    /// either case this call removed nothing. `Ok(false)` therefore never authorises
+    /// cleanup to claim a path is gone — read it back.
+    ///
+    /// Like [`Self::compare_and_set`], the default refuses rather than pretending to be
+    /// conditional: a read-then-delete would race exactly the writer this exists to exclude.
+    async fn delete_owned(&self, path: &str, token: &str) -> StorageResult<bool> {
+        let _ = (path, token);
+        Err(StorageError::Unsupported {
+            operation: "delete_owned".to_string(),
+            backend: "default".to_string(),
+        })
+    }
 
     /// List secreton entries with filtering
     async fn list(&self, params: &QueryParams) -> StorageResult<Vec<SecretEntry>>;

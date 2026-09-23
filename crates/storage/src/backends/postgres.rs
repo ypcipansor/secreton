@@ -1,8 +1,8 @@
 //! PostgreSQL storage backend implementation using tokio-postgres
 
 use crate::{
-    HealthStatus, QueryParams, SecretEntry, SecurityLevel, StorageBackend, StorageError,
-    StorageResult, StorageStats, StorageTransaction,
+    Coordination, HealthStatus, QueryParams, SecretEntry, SecurityLevel, StorageBackend,
+    StorageError, StorageResult, StorageStats, StorageTransaction,
 };
 use async_trait::async_trait;
 use deadpool_postgres::{Config, Pool, Runtime};
@@ -357,6 +357,137 @@ impl StorageBackend for PostgresBackend {
                 .map_err(|e| StorageError::QueryFailed {
                     message: format!("Failed to delete secreton entry: {}", e),
                 })?;
+
+        Ok(rows_affected > 0)
+    }
+
+    fn coordination(&self) -> Coordination {
+        // A shared PostgreSQL is exactly the case where an in-process mutex is not enough:
+        // separate replicas each hold their own, so the row itself has to arbitrate. The
+        // conditional statements below do that in the database.
+        Coordination::CrossProcess
+    }
+
+    /// Conditional write as one statement, so the check and the write cannot interleave.
+    ///
+    /// `ON CONFLICT (path) DO NOTHING` is the insert-if-absent case. For the owner case,
+    /// `DO UPDATE ... WHERE` makes the update itself conditional: PostgreSQL evaluates the
+    /// `WHERE` against the row it is about to overwrite, inside the statement's own
+    /// snapshot, so a record that changed between the caller's read and this write is not
+    /// overwritten and `rows_affected` is 0. That is what makes this a compare-and-set
+    /// rather than the read-then-write the trait's default `upsert` performs.
+    async fn compare_and_set(
+        &self,
+        entry: &SecretEntry,
+        expect: crate::Expect<'_>,
+    ) -> StorageResult<bool> {
+        let client = self
+            .pool
+            .get()
+            .await
+            .map_err(|e| StorageError::ConnectionFailed {
+                message: format!("Failed to get connection: {}", e),
+            })?;
+
+        let encryption_metadata_json =
+            serde_json::to_value(&entry.encryption_metadata).map_err(|e| {
+                StorageError::SerializationError {
+                    message: format!("Failed to serialize encryption metadata: {}", e),
+                }
+            })?;
+        let metadata_json = serde_json::to_value(&entry.metadata).map_err(|e| {
+            StorageError::SerializationError {
+                message: format!("Failed to serialize metadata: {}", e),
+            }
+        })?;
+
+        // `id` and `created_at` are never written on the update path: the existing row's
+        // identity and creation time are preserved, matching `upsert`.
+        let update_set = r#"
+                encrypted_data = EXCLUDED.encrypted_data,
+                encryption_metadata = EXCLUDED.encryption_metadata,
+                security_level = EXCLUDED.security_level,
+                metadata = EXCLUDED.metadata,
+                tags = EXCLUDED.tags,
+                version = EXCLUDED.version,
+                owner_id = EXCLUDED.owner_id,
+                updated_at = EXCLUDED.updated_at,
+                expires_at = EXCLUDED.expires_at"#;
+
+        let base = "INSERT INTO secreton_entries \
+            (id, path, encrypted_data, encryption_metadata, security_level, metadata, tags, version, owner_id, created_at, updated_at, expires_at) \
+            VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)";
+
+        let query = match expect {
+            crate::Expect::Absent => format!("{base} ON CONFLICT (path) DO NOTHING"),
+            crate::Expect::Any => format!("{base} ON CONFLICT (path) DO UPDATE SET{update_set}"),
+            crate::Expect::Owner(_) => {
+                // The owner key is a compile-time constant, not interpolated input.
+                format!(
+                    "{base} ON CONFLICT (path) DO UPDATE SET{update_set} \
+                     WHERE secreton_entries.metadata->>'{owner}' = $13",
+                    owner = crate::OWNER_TOKEN_KEY
+                )
+            }
+        };
+
+        let security_level = entry.security_level as i32;
+        let version = entry.version as i32;
+
+        let token = match expect {
+            crate::Expect::Owner(token) => Some(token.to_string()),
+            _ => None,
+        };
+
+        let mut params: Vec<&(dyn tokio_postgres::types::ToSql + Sync)> = vec![
+            &entry.id,
+            &entry.path,
+            &entry.encrypted_data,
+            &encryption_metadata_json,
+            &security_level,
+            &metadata_json,
+            &entry.tags,
+            &version,
+            &entry.owner_id,
+            &entry.created_at,
+            &entry.updated_at,
+            &entry.expires_at,
+        ];
+        if let Some(token) = &token {
+            params.push(token);
+        }
+
+        let rows_affected =
+            client
+                .execute(&query, &params)
+                .await
+                .map_err(|e| StorageError::QueryFailed {
+                    message: format!("Failed to compare-and-set secreton entry: {}", e),
+                })?;
+
+        Ok(rows_affected > 0)
+    }
+
+    async fn delete_owned(&self, path: &str, token: &str) -> StorageResult<bool> {
+        let client = self
+            .pool
+            .get()
+            .await
+            .map_err(|e| StorageError::ConnectionFailed {
+                message: format!("Failed to get connection: {}", e),
+            })?;
+
+        let query = format!(
+            "DELETE FROM secreton_entries WHERE path = $1 AND metadata->>'{}' = $2",
+            crate::OWNER_TOKEN_KEY
+        );
+
+        let rows_affected = client
+            .execute(&query, &[&path, &token])
+            .await
+            .map_err(|e| StorageError::QueryFailed {
+                message: format!("Failed to delete owned secreton entry: {}", e),
+            })?;
 
         Ok(rows_affected > 0)
     }

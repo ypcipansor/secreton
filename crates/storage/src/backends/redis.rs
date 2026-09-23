@@ -1,8 +1,8 @@
 //! Modern Redis storage backend implementation using redis v0.1.0-alpha.1
 
 use crate::{
-    HealthStatus, QueryParams, SecretEntry, StorageBackend, StorageError, StorageResult,
-    StorageStats, StorageTransaction,
+    Coordination, HealthStatus, QueryParams, SecretEntry, StorageBackend, StorageError,
+    StorageResult, StorageStats, StorageTransaction,
 };
 use async_trait::async_trait;
 use chrono::Utc;
@@ -264,14 +264,17 @@ impl StorageBackend for RedisBackend {
 
     async fn get_by_path(&self, path: &str) -> StorageResult<Option<SecretEntry>> {
         let key = format!("secreton:path:{}", path);
-        let mut conn = self.manager.lock().await;
 
-        let entry_id: Option<String> =
+        // Resolve the id and release the connection before reading the entry: `get_by_id`
+        // takes the same non-reentrant lock, so holding it across that call deadlocks.
+        let entry_id: Option<String> = {
+            let mut conn = self.manager.lock().await;
             conn.get(&key)
                 .await
                 .map_err(|e| StorageError::QueryFailed {
                     message: format!("Failed to get path mapping: {}", e),
-                })?;
+                })?
+        };
 
         match entry_id {
             Some(id_str) => {
@@ -290,28 +293,266 @@ impl StorageBackend for RedisBackend {
         self.store(entry).await
     }
 
-    async fn delete_by_id(&self, _id: Uuid) -> StorageResult<bool> {
-        Ok(false)
+    async fn delete_by_id(&self, id: Uuid) -> StorageResult<bool> {
+        let entry_key = format!("secreton:entry:{}", id);
+        let mut conn = self.manager.lock().await;
+
+        // Read the entry first so its path mapping is removed with it; leaving the mapping
+        // behind would make `get_by_path` resolve an id that no longer exists, which reads
+        // as a missing record rather than a stale index.
+        let value: Option<String> =
+            conn.get(&entry_key)
+                .await
+                .map_err(|e| StorageError::QueryFailed {
+                    message: format!("Failed to read entry before delete: {}", e),
+                })?;
+
+        let removed: u64 = conn
+            .del(&entry_key)
+            .await
+            .map_err(|e| StorageError::QueryFailed {
+                message: format!("Failed to delete entry: {}", e),
+            })?;
+
+        if removed > 0
+            && let Some(json_str) = value
+            && let Ok(entry) = serde_json::from_str::<SecretEntry>(&json_str)
+            && !entry.path.is_empty()
+        {
+            let path_key = format!("secreton:path:{}", entry.path);
+            let _: () = conn
+                .del(&path_key)
+                .await
+                .map_err(|e| StorageError::QueryFailed {
+                    message: format!("Failed to delete path mapping: {}", e),
+                })?;
+        }
+
+        Ok(removed > 0)
     }
 
-    async fn delete_by_path(&self, _path: &str) -> StorageResult<bool> {
-        Ok(false)
+    async fn delete_by_path(&self, path: &str) -> StorageResult<bool> {
+        // Resolve the path to an id under the connection lock, then delete by id, so the
+        // path mapping and the entry are removed together and this reports whether a
+        // record was actually there.
+        match self.get_by_path(path).await? {
+            Some(entry) => self.delete_by_id(entry.id).await,
+            None => Ok(false),
+        }
     }
 
-    async fn list(&self, _params: &QueryParams) -> StorageResult<Vec<SecretEntry>> {
-        Ok(Vec::new())
+    async fn exists(&self, path: &str) -> StorageResult<bool> {
+        let key = format!("secreton:path:{}", path);
+        let mut conn = self.manager.lock().await;
+        let exists: bool = conn
+            .exists(&key)
+            .await
+            .map_err(|e| StorageError::QueryFailed {
+                message: format!("Failed to check existence: {}", e),
+            })?;
+        Ok(exists)
     }
 
-    async fn count(&self, _params: &QueryParams) -> StorageResult<u64> {
-        Ok(0)
+    fn coordination(&self) -> Coordination {
+        // Redis is the shared backend in the deployments this repository actually runs, so
+        // its conditional operations are `SET ... NX` and `DEL` guarded by a Lua script:
+        // each is a single server-side operation that every replica observes.
+        Coordination::CrossProcess
     }
 
-    async fn exists(&self, _path: &str) -> StorageResult<bool> {
-        Ok(false)
+    /// Conditional write as a single server-side operation.
+    ///
+    /// Every precondition is evaluated against the *path* mapping, because the path is the
+    /// identity the caller is fencing on. Checking an entry key derived from the caller's
+    /// own id would find nothing for a fresh id and report success unconditionally — which
+    /// is how an insert-if-absent turns into a lock that does not lock.
+    ///
+    /// The record body is never re-encoded inside the script: Lua's `cjson` renders an
+    /// empty table as `{}`, so a round-trip turns an empty `tags` array into a map and the
+    /// entry stops deserialising. The caller hands over a fully-formed value and the script
+    /// only chooses to write it or not; id and creation time are preserved in Rust, where
+    /// serde handles the types, exactly as the memory and file backends do.
+    async fn compare_and_set(
+        &self,
+        entry: &SecretEntry,
+        expect: crate::Expect<'_>,
+    ) -> StorageResult<bool> {
+        let path_key = format!("secreton:path:{}", entry.path);
+
+        // Read the current record first (without holding the connection lock across the
+        // read) so a replacement keeps the identity and creation time the path already had.
+        let existing = self.get_by_path(&entry.path).await?;
+        let to_write = match &existing {
+            Some(old) => {
+                let mut updated = entry.clone();
+                updated.id = old.id;
+                updated.created_at = old.created_at;
+                updated
+            }
+            None => entry.clone(),
+        };
+
+        let value =
+            serde_json::to_string(&to_write).map_err(|e| StorageError::SerializationError {
+                message: e.to_string(),
+            })?;
+
+        let expected_owner = match expect {
+            crate::Expect::Owner(token) => Some(token.to_string()),
+            _ => None,
+        };
+
+        // KEYS[1]=path key; ARGV[1]=value, ARGV[2]=write id, ARGV[3]=mode
+        // ("absent" | "any" | "owner"), ARGV[4]=owner token (owner mode only).
+        let script = redis::Script::new(
+            r"
+            local mode = ARGV[3]
+            local existing_id = redis.call('GET', KEYS[1])
+
+            if mode == 'absent' then
+                if existing_id then
+                    return 0
+                end
+            elseif mode == 'owner' then
+                if not existing_id then
+                    return 0
+                end
+                local current = redis.call('GET', 'secreton:entry:' .. existing_id)
+                if not current then
+                    return 0
+                end
+                local ok, decoded = pcall(cjson.decode, current)
+                if not ok or type(decoded) ~= 'table' or type(decoded.metadata) ~= 'table'
+                    or decoded.metadata['storage_owner'] ~= ARGV[4] then
+                    return 0
+                end
+            end
+
+            -- The value and the path mapping must name the same id, so the mapping never
+            -- resolves to a record whose own id disagrees. A key left by the id this
+            -- replaces is removed so the rewrite does not leak it.
+            if existing_id and existing_id ~= ARGV[2] then
+                redis.call('DEL', 'secreton:entry:' .. existing_id)
+            end
+            redis.call('SET', 'secreton:entry:' .. ARGV[2], ARGV[1])
+            redis.call('SET', KEYS[1], ARGV[2])
+            return 1
+            ",
+        );
+
+        let mode = match expect {
+            crate::Expect::Absent => "absent",
+            crate::Expect::Any => "any",
+            crate::Expect::Owner(_) => "owner",
+        };
+
+        let written: i64 = {
+            let mut conn = self.manager.lock().await;
+            script
+                .key(&path_key)
+                .arg(&value)
+                .arg(to_write.id.to_string())
+                .arg(mode)
+                .arg(expected_owner.unwrap_or_default())
+                .invoke_async(&mut *conn)
+                .await
+                .map_err(|e| StorageError::QueryFailed {
+                    message: format!("Failed to compare-and-set entry: {}", e),
+                })?
+        };
+
+        Ok(written == 1)
+    }
+
+    async fn delete_owned(&self, path: &str, token: &str) -> StorageResult<bool> {
+        let path_key = format!("secreton:path:{}", path);
+        let mut conn = self.manager.lock().await;
+
+        // KEYS[1]=path key; ARGV[1]=owner token. Resolves the id, verifies ownership, and
+        // deletes both the entry and the mapping in one script.
+        let script = redis::Script::new(
+            r"
+            local id = redis.call('GET', KEYS[1])
+            if not id then
+                return 0
+            end
+            local entry_key = 'secreton:entry:' .. id
+            local current = redis.call('GET', entry_key)
+            if not current then
+                return 0
+            end
+            local ok, decoded = pcall(cjson.decode, current)
+            if not ok or not decoded.metadata or decoded.metadata['storage_owner'] ~= ARGV[1] then
+                return 0
+            end
+            redis.call('DEL', entry_key)
+            redis.call('DEL', KEYS[1])
+            return 1
+            ",
+        );
+
+        let removed: i64 = script
+            .key(&path_key)
+            .arg(token)
+            .invoke_async(&mut *conn)
+            .await
+            .map_err(|e| StorageError::QueryFailed {
+                message: format!("Failed to delete owned entry: {}", e),
+            })?;
+
+        Ok(removed == 1)
     }
 
     async fn begin_transaction(&self) -> StorageResult<Box<dyn StorageTransaction>> {
         Ok(Box::new(RedisTransaction::new(self.manager.clone())))
+    }
+
+    async fn list(&self, params: &QueryParams) -> StorageResult<Vec<SecretEntry>> {
+        // Redis holds entries keyed by id with a separate path index. Scanning keys is
+        // the only way to enumerate them, and `SCAN` is the non-blocking cursor the
+        // server provides for exactly this; `KEYS` would stall the whole server.
+        let mut conn = self.manager.lock().await;
+        let mut cursor: u64 = 0;
+        let mut entries = Vec::new();
+
+        loop {
+            let (next, keys): (u64, Vec<String>) = redis::cmd("SCAN")
+                .arg(cursor)
+                .arg("MATCH")
+                .arg("secreton:entry:*")
+                .arg("COUNT")
+                .arg(100)
+                .query_async(&mut *conn)
+                .await
+                .map_err(|e| StorageError::QueryFailed {
+                    message: format!("Failed to scan entries: {}", e),
+                })?;
+
+            for key in keys {
+                let value: Option<String> =
+                    conn.get(&key)
+                        .await
+                        .map_err(|e| StorageError::QueryFailed {
+                            message: format!("Failed to read entry during scan: {}", e),
+                        })?;
+                if let Some(json_str) = value
+                    && let Ok(entry) = serde_json::from_str::<SecretEntry>(&json_str)
+                {
+                    entries.push(entry);
+                }
+            }
+
+            cursor = next;
+            if cursor == 0 {
+                break;
+            }
+        }
+
+        Ok(params.apply_to(entries))
+    }
+
+    async fn count(&self, params: &QueryParams) -> StorageResult<u64> {
+        Ok(self.list(params).await?.len() as u64)
     }
 
     async fn health_check(&self) -> StorageResult<HealthStatus> {

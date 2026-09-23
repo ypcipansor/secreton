@@ -137,16 +137,40 @@ record TOTP yang perlu dibersihkan.
 Marker dihapus paling akhir dan hanya jika seluruh artefak wajib benar-benar terhapus.
 Selama satu delete gagal, marker tetap ada dan `init` mengembalikan error, sehingga percobaan
 berikutnya mengulang pembersihan yang sama. Path yang tidak ada dihitung sukses (idempoten);
-vault yang sudah committed tidak pernah dihapus artefaknya. Penulisan marker memakai operasi
-upsert, bukan insert, karena `init` menulisnya beberapa kali: PostgreSQL menolak insert kedua
-ke `path` yang sama pada constraint `UNIQUE`, sedangkan backend memory menerimanya.
+vault yang sudah committed tidak pernah dihapus artefaknya. Setiap penghapusan diverifikasi
+dengan membaca ulang path tersebut: `delete_by_path` mengembalikan `true` hanya jika record
+benar-benar ada dan dihapus oleh panggilan itu, dan `false` jika tidak ada — nilai itu
+dipakai untuk mencocokkan id record, bukan untuk menyimpulkan path sekarang kosong, karena
+sebuah backend yang gagal menghapus tetap melaporkan `false`. Marker memakai `upsert` pada
+backend satu proses (harus ditulis beberapa kali, dan PostgreSQL menolak insert kedua ke
+`path` yang sama), dan `compare_and_set` dengan precondition pemilik pada backend bersama.
 
 Inisialisasi diserialkan dalam satu proses oleh sebuah async mutex yang dipegang untuk
 seluruh urutan (recovery, guard `is_initialized`, staging, penulisan, commit, penghapusan
 marker, dan cleanup). Dua pemanggilan `init` yang bersamaan karenanya menghasilkan tepat satu
-pemenang; pemanggilan lainnya ditolak dengan aman. Batas ini berlaku per proses — untuk
-backend yang dipakai bersama, dua proses berbeda tidak diserialkan oleh trait storage saat ini
-dan masing-masing harus melakukan inisialisasi secara terkoordinasi.
+pemenang; pemanggilan lainnya ditolak dengan aman.
+
+Jaminan lintas proses bergantung pada kemampuan backend, yang dinyatakan oleh
+`StorageBackend::coordination()`. Backend yang memang bisa dipakai bersama
+(`CrossProcess` — PostgreSQL, Redis, file dengan direktori bersama) mengimplementasikan
+`compare_and_set` dan `delete_owned` secara atomik; `init` mengambil lease di
+`sys/init_lease` dengan insert-if-absent (`Expect::Absent`), yang hanya dapat dimenangkan
+satu pemanggil, dan melepasnya di akhir dengan `delete_owned` yang hanya berlaku selama
+lease itu masih miliknya. Lease yang kedaluwarsa boleh diambil alih hanya lewat penulisan
+bersyarat terhadap token pemilik yang benar-benar ada, sehingga replika yang mati di tengah
+inisialisasi tidak memblokir recovery selamanya dan lease yang masih hidup tidak dicuri.
+Rollback, commit, dan penghapusan marker juga bersyarat pada token pemilik, jadi cleanup
+yang basi tidak dapat menghapus artefak percobaan yang lebih baru. Backend yang tidak dapat
+memisahkan proses (`SingleProcess` — memory, Raft single-node) melaporkan demikian, dan
+mutex dalam proses adalah jaminan lengkapnya karena tidak ada replika kedua yang dapat
+berbagi backend itu.
+
+Semua backend `CrossProcess` memakai compare-and-set yang benar-benar atomik: PostgreSQL
+memakai `ON CONFLICT ... DO UPDATE ... WHERE` dalam satu statement, Redis memakai satu
+skrip Lua, dan file memakai OS advisory lock serta rename atomik. Tidak ada implementasi
+yang memakai `upsert` read-then-write (yang tidak atomik) sebagai kunci, dan backend yang
+tidak mampu mengembalikan `StorageError::Unsupported` alih-alih kunci palsu — `init`
+memperlakukannya sebagai kegagalan keras.
 
 Vault yang dibuat sebelum `sys/root_identity` ada tetap dapat dipakai. Setelah barrier
 terbuka, jika tidak ada record identitas, `unseal` mencari akun legacy bernama `root`,

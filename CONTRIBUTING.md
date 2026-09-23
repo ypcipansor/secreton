@@ -120,6 +120,19 @@ the account exists after issuing and is gone after revoking — a generated user
 password returned without provisioning anything is not an implementation, and a caller
 cannot tell the difference from a response body.
 
+Tests that need a real service skip when its environment variable is unset, and CI sets all
+three:
+
+| Variable | Service | What it proves |
+|---|---|---|
+| `SECRETON_TEST_POSTGRES_URL` | PostgreSQL | Issued database credentials correspond to a real account; two replicas sharing one PostgreSQL admit exactly one `init` |
+| `SECRETON_TEST_MYSQL_URL` | MySQL/MariaDB | The same for MySQL |
+| `SECRETON_TEST_REDIS_URL` | Redis | `delete_by_path` reports and performs the delete; `compare_and_set` arbitrates; two replicas sharing one Redis admit exactly one `init` |
+
+The Redis tests exist because "path-keyed operations are a no-op" was true of that backend
+and could only be caught against the real server — a double cannot show whether the Lua
+script does what the Rust around it assumes.
+
 ## Adding things
 
 ### A REST endpoint
@@ -178,6 +191,13 @@ Chromium, skip it and set `CHROMIUM_PATH=/path/to/chromium`.
 It writes `docs/screenshots/*.png`, which the README embeds. A screenshot that shows a
 blank page or a raw error is worse than none, which is why the script asserts rather than
 just capturing.
+
+CI runs the same suite in the [`Screenshots`](.github/workflows/screenshots.yml) workflow:
+it starts a server, creates an account with a password generated per run, captures every
+view and fails on any assertion. The job never commits the images. If the capture changes a
+committed PNG it warns and uploads the new ones as an artifact, so a human decides whether
+the change is intended — the dashboard embeds the live secret count, so that view's pixels
+move on their own. Regenerate and commit deliberately with the commands above.
 
 ## Commits and pull requests
 

@@ -37,14 +37,27 @@ fn database_url() -> Option<String> {
     }
 }
 
+/// Migrate once per process. The tests here run in parallel against one database, and
+/// concurrent DDL from two `migrate()` calls races on the schema — unrelated to what any
+/// of them is testing.
+async fn migrate_once(url: &str) {
+    static MIGRATED: tokio::sync::OnceCell<()> = tokio::sync::OnceCell::const_new();
+    MIGRATED
+        .get_or_init(|| async {
+            let backend = PostgresBackend::new(url).await.expect("connect");
+            backend.migrate().await.expect("migrate");
+        })
+        .await;
+}
+
 #[tokio::test]
 async fn initialization_completes_on_a_unique_path_backend() {
     let Some(url) = database_url() else {
         return;
     };
 
+    migrate_once(&url).await;
     let backend = PostgresBackend::new(&url).await.expect("connect");
-    backend.migrate().await.expect("migrate");
 
     // A dedicated path namespace per run, so a previous run's rows cannot make this pass
     // or fail for the wrong reason and this test cannot collide with another.
@@ -76,7 +89,6 @@ async fn initialization_completes_on_a_unique_path_backend() {
         .init(3, 2, "pg-root", &auth, &mfa)
         .await
         .expect("initialization must survive a UNIQUE(path) backend");
-
     // The shares open the vault and issue a credential for the named account.
     let partial = seal.unseal(&init.keys[0]).await.expect("share one");
     assert!(partial.sealed);
@@ -98,6 +110,133 @@ async fn initialization_completes_on_a_unique_path_backend() {
         "a completed initialization must clear its staging marker"
     );
     assert!(seal.is_initialized().await);
+}
+
+/// Two independent `SealService` instances, each on its own PostgreSQL connection pool,
+/// sharing one database, must admit exactly one initialization.
+///
+/// The in-process `init_lock` cannot serialise these: they are separate service graphs and
+/// separate pools, exactly as two replicas are. Only the cross-process lease — an
+/// `INSERT ... ON CONFLICT DO NOTHING` on `sys/init_lease`, which PostgreSQL evaluates
+/// atomically — can. This is the integration-level counterpart of
+/// `two_service_instances_sharing_a_backend_admit_exactly_one_winner`, proving the
+/// guarantee against the real backend rather than a double.
+#[tokio::test]
+async fn two_replicas_on_one_postgres_admit_exactly_one_initialization() {
+    let Some(url) = database_url() else {
+        return;
+    };
+
+    let namespace = format!("it/{}", uuid::Uuid::new_v4());
+    let scoped = |backend: PostgresBackend| -> Arc<dyn StorageBackend + Send + Sync> {
+        Arc::new(NamespacedBackend {
+            inner: backend,
+            prefix: namespace.clone(),
+        })
+    };
+
+    // Two pools, as two processes would each open their own.
+    migrate_once(&url).await;
+    let backend_a = PostgresBackend::new(&url).await.expect("connect A");
+    let backend_b = PostgresBackend::new(&url).await.expect("connect B");
+
+    let storage_a = scoped(backend_a);
+    let storage_b = scoped(backend_b);
+
+    // Start replica A and let it reach a point past the guard and past its first staging
+    // write, then start B while A is still running. Both are started before either can
+    // finish, so the overlap is real rather than hoped for.
+    let (auth_a, mfa_a, seal_a) = replica(storage_a.clone()).await;
+    let (auth_b, mfa_b, seal_b) = replica(storage_b.clone()).await;
+
+    let a = {
+        let seal_a = seal_a.clone();
+        let auth_a = auth_a.clone();
+        let mfa_a = mfa_a.clone();
+        tokio::spawn(async move { seal_a.init(3, 2, "pg-winner", &auth_a, &mfa_a).await })
+    };
+    let b = {
+        let seal_b = seal_b.clone();
+        let auth_b = auth_b.clone();
+        let mfa_b = mfa_b.clone();
+        tokio::spawn(async move { seal_b.init(3, 2, "pg-loser", &auth_b, &mfa_b).await })
+    };
+
+    let (result_a, result_b) = tokio::join!(a, b);
+    let result_a = result_a.expect("task A");
+    let result_b = result_b.expect("task B");
+
+    let successes = [&result_a, &result_b].iter().filter(|r| r.is_ok()).count();
+    assert_eq!(
+        successes,
+        1,
+        "exactly one replica must initialize; got A={:?} B={:?}",
+        result_a.as_ref().err().map(|e| e.to_string()),
+        result_b.as_ref().err().map(|e| e.to_string()),
+    );
+
+    // Whichever won, the vault is initialised once and its shares open the stored key.
+    let winner = result_a.as_ref().or(result_b.as_ref()).expect("one winner");
+    let (winner_seal, winner_auth) = if result_a.is_ok() {
+        (seal_a.clone(), auth_a.clone())
+    } else {
+        (seal_b.clone(), auth_b.clone())
+    };
+    assert!(winner_seal.is_initialized().await);
+    winner_seal
+        .unseal(&winner.keys[0])
+        .await
+        .expect("share one");
+    let complete = winner_seal
+        .unseal(&winner.keys[1])
+        .await
+        .expect("the winner's shares must open the stored root key");
+    let token = complete
+        .root_token
+        .expect("the winner must issue a bootstrap credential");
+    let user = winner_auth.validate_token(&token).await.expect("validates");
+    assert!(
+        user.username == "pg-winner" || user.username == "pg-loser",
+        "the credential must name the winner's account, not some other state"
+    );
+
+    // The lease was released, so the vault is not left locked out of a future operation.
+    assert!(
+        storage_a
+            .get_by_path("sys/init_lease")
+            .await
+            .expect("storage")
+            .is_none(),
+        "a completed initialization must release its cross-process lease"
+    );
+}
+
+/// Build one replica's service graph over `storage`.
+async fn replica(
+    storage: Arc<dyn StorageBackend + Send + Sync>,
+) -> (
+    Arc<AuthenticationService>,
+    Arc<secreton_auth::mfa::CombinedMfaService>,
+    Arc<SealService>,
+) {
+    let crypto = Arc::new(CryptoService::new(storage.clone()).await.expect("crypto"));
+    let mut config = AuthConfig::default();
+    config.jwt.secret = Some("integration-test-secret-1234567890".to_string());
+    let auth = Arc::new(
+        AuthenticationService::new(storage.clone(), crypto.clone(), &config)
+            .await
+            .expect("auth"),
+    );
+    let audit = Arc::new(
+        AuditLogger::new(storage.clone(), 2555, 100, true)
+            .await
+            .expect("audit"),
+    );
+    let seal = Arc::new(SealService::new(storage.clone(), crypto.clone()))
+        .with_auth(auth.clone())
+        .with_audit(audit.clone());
+    let mfa = mfa_service(storage, crypto).await;
+    (auth, mfa, seal)
 }
 
 /// The MFA service the engine graph expects, built from the public MFA types.
@@ -189,6 +328,27 @@ impl StorageBackend for NamespacedBackend {
 
     async fn delete_by_path(&self, path: &str) -> secreton_storage::StorageResult<bool> {
         self.inner.delete_by_path(&self.scope(path)).await
+    }
+
+    fn coordination(&self) -> secreton_storage::Coordination {
+        // The wrapper must not downgrade what it wraps: PostgreSQL arbitrates across
+        // processes, and a test wrapper that reported otherwise would make the seal service
+        // skip the cross-process lease and pass while testing the wrong guarantee.
+        self.inner.coordination()
+    }
+
+    async fn compare_and_set(
+        &self,
+        entry: &secreton_storage::SecretEntry,
+        expect: secreton_storage::Expect<'_>,
+    ) -> secreton_storage::StorageResult<bool> {
+        let mut scoped = entry.clone();
+        scoped.path = self.scope(&entry.path);
+        self.inner.compare_and_set(&scoped, expect).await
+    }
+
+    async fn delete_owned(&self, path: &str, token: &str) -> secreton_storage::StorageResult<bool> {
+        self.inner.delete_owned(&self.scope(path), token).await
     }
 
     async fn list(

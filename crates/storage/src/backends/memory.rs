@@ -109,6 +109,60 @@ impl StorageBackend for MemoryBackend {
         }
     }
 
+    /// Atomic within this backend's own lock: the check and the write happen while the
+    /// same `RwLock` write guard is held, so no other task on this instance can observe
+    /// the path between them. Two `MemoryBackend`s are two separate maps, so this is
+    /// in-process only by construction — which is all a process-local backend can offer.
+    async fn compare_and_set(
+        &self,
+        entry: &SecretEntry,
+        expect: crate::Expect<'_>,
+    ) -> StorageResult<bool> {
+        let mut data = self.data.write();
+        let existing = data.get(&entry.path);
+
+        let holds = match expect {
+            crate::Expect::Absent => existing.is_none(),
+            crate::Expect::Owner(token) => existing.is_some_and(|e| e.has_owner(token)),
+            crate::Expect::Any => true,
+        };
+        if !holds {
+            return Ok(false);
+        }
+
+        // A replacement keeps the existing record's id and creation time, matching
+        // [`StorageBackend::upsert`]: the path is the identity that matters and callers
+        // that go on to `update` are keyed by id on PostgreSQL.
+        let to_write = match existing {
+            Some(old) => {
+                let mut updated = entry.clone();
+                updated.id = old.id;
+                updated.created_at = old.created_at;
+                updated
+            }
+            None => entry.clone(),
+        };
+        let mut id_index = self.id_index.write();
+        if let Some(old) = existing {
+            let old_id = old.id;
+            id_index.remove(&old_id);
+        }
+        id_index.insert(to_write.id, to_write.path.clone());
+        data.insert(to_write.path.clone(), to_write);
+        Ok(true)
+    }
+
+    async fn delete_owned(&self, path: &str, token: &str) -> StorageResult<bool> {
+        let mut data = self.data.write();
+        let owned = data.get(path).is_some_and(|e| e.has_owner(token));
+        if !owned {
+            return Ok(false);
+        }
+        let entry = data.remove(path).expect("just checked present");
+        self.id_index.write().remove(&entry.id);
+        Ok(true)
+    }
+
     async fn list(&self, params: &QueryParams) -> StorageResult<Vec<SecretEntry>> {
         let data = self.data.read();
         let mut results: Vec<SecretEntry> = data

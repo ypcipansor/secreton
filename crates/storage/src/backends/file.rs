@@ -3,8 +3,8 @@
 //! enabling simple file-based storage with full CRUD operations, querying, and statistics collection.
 
 use crate::{
-    HealthStatus, QueryParams, SecretEntry, StorageBackend, StorageError, StorageResult,
-    StorageStats, StorageTransaction,
+    Coordination, HealthStatus, QueryParams, SecretEntry, StorageBackend, StorageError,
+    StorageResult, StorageStats, StorageTransaction,
 };
 use async_trait::async_trait;
 use chrono::Utc;
@@ -19,6 +19,23 @@ use uuid::Uuid;
 #[derive(Debug)]
 pub struct FileBackend {
     storage_path: PathBuf,
+}
+
+/// RAII guard for the file backend's cross-process advisory lock; released on drop.
+///
+/// Holding it is what makes [`StorageBackend::compare_and_set`] and
+/// [`StorageBackend::delete_owned`] indivisible between separate processes sharing one
+/// storage directory: the OS lock (`flock` on Unix, `LockFileEx` on Windows) excludes
+/// every other holder, not merely other tasks in this process.
+#[derive(Debug)]
+struct FileLock {
+    file: std::fs::File,
+}
+
+impl Drop for FileLock {
+    fn drop(&mut self) {
+        let _ = self.file.unlock();
+    }
 }
 
 impl FileBackend {
@@ -79,6 +96,83 @@ impl FileBackend {
             backend: "File".to_string(),
             message: format!("Failed to write entry file {}: {}", file_path.display(), e),
         })
+    }
+
+    /// Write an entry through a temporary file and a rename, so a reader never observes a
+    /// half-written record.
+    ///
+    /// A plain `fs::write` truncates the destination before writing; a crash or a
+    /// concurrent scanner in that window sees an empty or partial file. `rename` within a
+    /// directory is atomic, which is the property [`StorageBackend::compare_and_set`]
+    /// needs to be a real compare-and-set rather than a compare-and-maybe-write.
+    fn write_entry_atomically(&self, file_path: &Path, entry: &SecretEntry) -> StorageResult<()> {
+        let content =
+            serde_json::to_string_pretty(entry).map_err(|e| StorageError::SerializationError {
+                message: format!("Failed to serialize entry: {}", e),
+            })?;
+
+        let tmp = file_path.with_extension("json.tmp");
+        fs::write(&tmp, content).map_err(|e| StorageError::BackendError {
+            backend: "File".to_string(),
+            message: format!("Failed to write entry file {}: {}", tmp.display(), e),
+        })?;
+        fs::rename(&tmp, file_path).map_err(|e| StorageError::BackendError {
+            backend: "File".to_string(),
+            message: format!(
+                "Failed to publish entry file {}: {}",
+                file_path.display(),
+                e
+            ),
+        })
+    }
+
+    /// Path of the advisory lock that serialises this backend's conditional operations
+    /// across processes sharing the same storage directory.
+    fn lock_path(&self) -> PathBuf {
+        self.storage_path.join(".secreton.lock")
+    }
+
+    /// Take the backend's exclusive advisory lock, waiting for it.
+    ///
+    /// The wait is a bounded non-blocking retry loop rather than a blocking `lock()`: the
+    /// lock is held across the read and the write of a conditional operation, both of
+    /// which are already synchronous `std::fs` calls in this backend, and blocking a
+    /// Tokio worker for the whole wait would stall unrelated tasks. The lock is a real OS
+    /// advisory lock (`flock` on Unix, `LockFileEx` on Windows), so it excludes other
+    /// processes and other `FileBackend` instances in this process, not just tasks in it.
+    fn acquire_lock(&self) -> StorageResult<FileLock> {
+        let file = std::fs::OpenOptions::new()
+            .read(true)
+            .write(true)
+            .create(true)
+            .truncate(false)
+            .open(self.lock_path())
+            .map_err(|e| StorageError::BackendError {
+                backend: "File".to_string(),
+                message: format!("Failed to open storage lock file: {}", e),
+            })?;
+
+        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(30);
+        loop {
+            match file.try_lock() {
+                Ok(()) => return Ok(FileLock { file }),
+                Err(std::fs::TryLockError::WouldBlock) if std::time::Instant::now() < deadline => {
+                    std::thread::sleep(std::time::Duration::from_millis(5));
+                }
+                Err(std::fs::TryLockError::WouldBlock) => {
+                    return Err(StorageError::BackendError {
+                        backend: "File".to_string(),
+                        message: "Timed out waiting for the storage lock".to_string(),
+                    });
+                }
+                Err(std::fs::TryLockError::Error(e)) => {
+                    return Err(StorageError::BackendError {
+                        backend: "File".to_string(),
+                        message: format!("Failed to acquire storage lock: {}", e),
+                    });
+                }
+            }
+        }
     }
 
     /// Scan directory and collect all entries
@@ -173,7 +267,7 @@ impl FileBackend {
 impl StorageBackend for FileBackend {
     async fn store(&self, entry: &SecretEntry) -> StorageResult<()> {
         let file_path = self.entry_path(entry.id);
-        self.write_entry(&file_path, entry)
+        self.write_entry_atomically(&file_path, entry)
     }
 
     async fn get_by_id(&self, id: Uuid) -> StorageResult<Option<SecretEntry>> {
@@ -221,7 +315,10 @@ impl StorageBackend for FileBackend {
     }
 
     async fn delete_by_path(&self, path: &str) -> StorageResult<bool> {
-        // For path-based deletion, we need to find the entry first
+        // The read that locates the file and the unlink that removes it happen under the
+        // backend's advisory lock, so a concurrent `compare_and_set` at the same path
+        // cannot publish a new record between them and have this call delete it by id.
+        let _guard = self.acquire_lock()?;
         let entries = self.scan_entries()?;
         for entry in entries {
             if entry.path == path {
@@ -240,6 +337,64 @@ impl StorageBackend for FileBackend {
             }
         }
         Ok(false)
+    }
+
+    fn coordination(&self) -> Coordination {
+        // Several processes may point at one storage directory; the OS advisory lock is
+        // what arbitrates between them.
+        Coordination::CrossProcess
+    }
+
+    async fn compare_and_set(
+        &self,
+        entry: &SecretEntry,
+        expect: crate::Expect<'_>,
+    ) -> StorageResult<bool> {
+        // The entire check-then-write runs while the advisory lock is held, so it is a
+        // genuine compare-and-set for every other process sharing this directory.
+        let _guard = self.acquire_lock()?;
+        let existing = self.get_by_path(&entry.path).await?;
+
+        let holds = match expect {
+            crate::Expect::Absent => existing.is_none(),
+            crate::Expect::Owner(token) => existing.as_ref().is_some_and(|e| e.has_owner(token)),
+            crate::Expect::Any => true,
+        };
+        if !holds {
+            return Ok(false);
+        }
+
+        let to_write = match &existing {
+            Some(old) => {
+                let mut updated = entry.clone();
+                updated.id = old.id;
+                updated.created_at = old.created_at;
+                updated
+            }
+            None => entry.clone(),
+        };
+        self.write_entry_atomically(&self.entry_path(to_write.id), &to_write)?;
+        Ok(true)
+    }
+
+    async fn delete_owned(&self, path: &str, token: &str) -> StorageResult<bool> {
+        // Conditional on ownership *and* executed under the lock, so a record rewritten
+        // by another attempt between a naive read and delete cannot be removed by this one.
+        let _guard = self.acquire_lock()?;
+        let Some(entry) = self.get_by_path(path).await? else {
+            return Ok(false);
+        };
+        if !entry.has_owner(token) {
+            return Ok(false);
+        }
+        match fs::remove_file(self.entry_path(entry.id)) {
+            Ok(()) => Ok(true),
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(false),
+            Err(e) => Err(StorageError::BackendError {
+                backend: "File".to_string(),
+                message: format!("Failed to delete owned entry: {}", e),
+            }),
+        }
     }
 
     async fn list(&self, params: &QueryParams) -> StorageResult<Vec<SecretEntry>> {

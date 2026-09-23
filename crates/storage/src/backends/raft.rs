@@ -13,8 +13,8 @@ use tracing::{debug, error, info};
 use uuid::Uuid;
 
 use crate::{
-    HealthStatus, QueryParams, SecretEntry, StorageBackend, StorageError, StorageResult,
-    StorageStats, StorageTransaction,
+    Coordination, HealthStatus, QueryParams, SecretEntry, StorageBackend, StorageError,
+    StorageResult, StorageStats, StorageTransaction,
 };
 use secreton_domain::OAuthState;
 
@@ -544,6 +544,34 @@ impl StorageBackend for RaftStorageBackend {
                 message: "Unexpected response type".to_string(),
             }),
         }
+    }
+
+    /// Single-process only, stated rather than implied.
+    ///
+    /// This backend's "cluster" is a single node whose state machine is an in-process
+    /// `RwLock<HashMap>` (`initialize_cluster` elects itself leader and no peer is ever
+    /// contacted), and the data directory it creates is never written to. Two replicas
+    /// therefore hold two unrelated maps, so nothing here can arbitrate between them.
+    /// Reporting `CrossProcess` would let a caller believe a lease taken on one replica
+    /// excluded another, which is exactly the belief the seal service must not hold.
+    fn coordination(&self) -> Coordination {
+        Coordination::SingleProcess
+    }
+
+    /// Refused rather than faked.
+    ///
+    /// The state machine is process-local and the trait's default already refuses, but it
+    /// is restated here so the refusal is tied to the reason: a compare-and-set that could
+    /// not exclude another replica would be a lock that does not lock.
+    async fn compare_and_set(
+        &self,
+        _entry: &SecretEntry,
+        _expect: crate::Expect<'_>,
+    ) -> StorageResult<bool> {
+        Err(StorageError::Unsupported {
+            operation: "compare_and_set".to_string(),
+            backend: "raft".to_string(),
+        })
     }
 
     async fn list(&self, params: &QueryParams) -> StorageResult<Vec<SecretEntry>> {

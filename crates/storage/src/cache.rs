@@ -221,6 +221,27 @@ where
     fn cache_key_for_path(path: &str) -> String {
         format!("entry:path:{}", path)
     }
+
+    /// Refresh both cache keys for an entry, through the same keys `store` populates.
+    async fn cache_entry(&self, entry: &SecretEntry) {
+        let serialized = postcard::to_stdvec(entry).unwrap_or_default();
+        let _ = self
+            .cache
+            .set(
+                &Self::cache_key_for_id(entry.id),
+                serialized.clone(),
+                Some(self.default_ttl),
+            )
+            .await;
+        let _ = self
+            .cache
+            .set(
+                &Self::cache_key_for_path(&entry.path),
+                serialized,
+                Some(self.default_ttl),
+            )
+            .await;
+    }
 }
 
 #[async_trait]
@@ -371,6 +392,48 @@ where
         }
 
         Ok(result)
+    }
+
+    fn coordination(&self) -> crate::Coordination {
+        // A cache in front of a backend changes nothing about who arbitrates: the
+        // underlying store does, and this wrapper must not claim more than it has.
+        self.storage.coordination()
+    }
+
+    /// Delegated to the inner backend, which owns the arbitration.
+    ///
+    /// The cache is updated only after the conditional write reports success, and a
+    /// precondition that did not hold is reported as `Ok(false)` without touching it: a
+    /// lost race must not leave a cached copy of a write that never happened.
+    async fn compare_and_set(
+        &self,
+        entry: &SecretEntry,
+        expect: crate::Expect<'_>,
+    ) -> StorageResult<bool> {
+        let written = self.storage.compare_and_set(entry, expect).await?;
+        if written {
+            self.cache_entry(entry).await;
+        } else {
+            // The inner write did not happen, but a stale positive cache entry for this
+            // path would make a subsequent read report a record the backend may not have.
+            let _ = self
+                .cache
+                .delete(&Self::cache_key_for_path(&entry.path))
+                .await;
+        }
+        Ok(written)
+    }
+
+    async fn delete_owned(&self, path: &str, token: &str) -> StorageResult<bool> {
+        let entry = self.storage.get_by_path(path).await?;
+        let deleted = self.storage.delete_owned(path, token).await?;
+        if deleted {
+            let _ = self.cache.delete(&Self::cache_key_for_path(path)).await;
+            if let Some(entry) = entry {
+                let _ = self.cache.delete(&Self::cache_key_for_id(entry.id)).await;
+            }
+        }
+        Ok(deleted)
     }
 
     // For operations that return multiple entries, we don't cache them as they can be large
