@@ -188,15 +188,43 @@ pub enum Expect<'a> {
     Any,
 }
 
+/// A cross-process fencing token: the durable record a write must still be holding.
+///
+/// `check()`-then-write is not a guarantee. A snapshot of "I still own the lease" taken in
+/// one process says nothing about durable state by the time the next write lands, and the
+/// two are separated by an arbitrary window — a renewal that failed, a lease that expired
+/// and was taken over, a holder that lost a race it never observed. The only way to close
+/// that window is to make the write itself conditional on the fence *in the shared
+/// backend*, which is what [`StorageBackend::store_fenced`] does with this value.
+///
+/// It names the path and the owner token of the record that must still be present and
+/// still carry that token for the write to happen. Initialization fences on the lease
+/// record, not on the artifact's own token: an artifact's token is self-asserted by the
+/// writer and proves nothing, whereas the lease is the record a *winner* also has to hold.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct StorageFence<'a> {
+    /// Path of the record that must still exist and still be owned.
+    pub path: &'a str,
+    /// The owner token that record must still carry.
+    pub token: &'a str,
+}
+
+impl<'a> StorageFence<'a> {
+    pub fn new(path: &'a str, token: &'a str) -> Self {
+        Self { path, token }
+    }
+}
+
 /// What coordination a backend can actually provide between callers.
 ///
 /// This is a property of the backend, not a configuration knob, and it is what lets the
 /// seal service decide whether an operation needs a cross-process lease or can rely on its
 /// in-process mutex alone. A durable backend that two replicas may share must report
-/// [`Coordination::CrossProcess`] and implement [`StorageBackend::compare_and_set`] and
-/// [`StorageBackend::delete_owned`] for real; a backend that is inherently process-local
-/// reports [`Coordination::SingleProcess`], and the caller treats its in-process lock as
-/// the whole guarantee rather than inventing a fake cross-process one.
+/// [`Coordination::CrossProcess`] and implement [`StorageBackend::compare_and_set`],
+/// [`StorageBackend::delete_owned`] and [`StorageBackend::store_fenced`] for real; a backend
+/// that is inherently process-local reports [`Coordination::SingleProcess`], and the caller
+/// treats its in-process lock as the whole guarantee rather than inventing a fake
+/// cross-process one.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Coordination {
     /// Guarantees hold only within one process. Every `MemoryBackend` is a distinct map
@@ -537,6 +565,38 @@ pub trait StorageBackend: std::fmt::Debug + Send + Sync {
         let _ = (entry, expect);
         Err(StorageError::Unsupported {
             operation: "compare_and_set".to_string(),
+            backend: "default".to_string(),
+        })
+    }
+
+    /// Atomically write `entry` at its path, but only while `fence` still holds.
+    ///
+    /// This is the primitive that closes the `check()`-then-write window. A caller that has
+    /// taken a lease reads it in one step and writes an artifact in another; between those
+    /// steps the lease can expire, a renewal can fail, or a second process can legitimately
+    /// take it over. The check on its own cannot see any of that. This operation asks the
+    /// shared backend to evaluate the fence and perform the write **as one indivisible
+    /// step**, so the write either happens while the caller demonstrably still holds the
+    /// record, or it does not happen at all.
+    ///
+    /// Returns `Ok(true)` when the write landed and `Ok(false)` when the fence did not hold
+    /// — the caller has lost ownership and must treat its own attempt as failed rather than
+    /// published. An `Err` is a real storage failure. Neither of the non-`true` outcomes
+    /// authorises a fallback to an unconditional write: failing to prove ownership is the
+    /// answer, and the operation must fail closed.
+    ///
+    /// The default refuses, for the same reason [`Self::compare_and_set`] does: a
+    /// read-then-write default is exactly the race this exists to exclude, and a silent
+    /// non-atomic implementation is how a fake lock ships. A backend that reports
+    /// [`Coordination::CrossProcess`] must override this for real.
+    async fn store_fenced(
+        &self,
+        entry: &SecretEntry,
+        fence: StorageFence<'_>,
+    ) -> StorageResult<bool> {
+        let _ = (entry, fence);
+        Err(StorageError::Unsupported {
+            operation: "store_fenced".to_string(),
             backend: "default".to_string(),
         })
     }

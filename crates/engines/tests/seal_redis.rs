@@ -116,6 +116,21 @@ impl StorageBackend for NamespacedRedis {
         self.inner.delete_owned(&self.scope(path), token).await
     }
 
+    /// Scoped exactly like every other path-keyed operation, including the *fence* path: the
+    /// fence names the lease record, and an unscoped fence would look for it outside the
+    /// namespace and never find it.
+    async fn store_fenced(
+        &self,
+        entry: &SecretEntry,
+        fence: secreton_storage::StorageFence<'_>,
+    ) -> secreton_storage::StorageResult<bool> {
+        let mut scoped = entry.clone();
+        scoped.path = self.scope(&entry.path);
+        let scoped_fence_path = self.scope(fence.path);
+        let scoped_fence = secreton_storage::StorageFence::new(&scoped_fence_path, fence.token);
+        self.inner.store_fenced(&scoped, scoped_fence).await
+    }
+
     async fn list(
         &self,
         params: &secreton_storage::QueryParams,
@@ -383,6 +398,107 @@ async fn redis_compare_and_set_arbitrates_between_callers() {
             .await
             .expect("precondition on a token the caller does not hold"),
         "the precondition is the recorded token, whoever writes with it"
+    );
+}
+
+/// `store_fenced` is one server-side Lua invocation, so the fence record and the artifact it
+/// authorises are read and written in indivisible steps. This is the primitive the finding
+/// turns on: an attempt whose lease has been taken over must not be able to publish an
+/// artifact, and on Redis the pre-fix path wrote the *path mapping* unconditionally, so the
+/// winner's shares no longer opened the record the path resolved to.
+#[tokio::test]
+async fn redis_store_fenced_refuses_a_lost_lease_and_preserves_the_winner() {
+    let Some(url) = redis_url() else {
+        return;
+    };
+    let backend = RedisBackend::new(&url).await.expect("connect");
+    let storage: Arc<NamespacedRedis> = Arc::new(NamespacedRedis {
+        inner: backend,
+        prefix: format!("it/{}", uuid::Uuid::new_v4()),
+    });
+
+    let lease = "sys/init_lease";
+    let artifact = "sys/root_key_enc";
+    let entry = |token: &str, payload: &[u8]| {
+        SecretEntry::new(
+            artifact.to_string(),
+            payload.to_vec(),
+            secreton_storage::EncryptionMetadata::default(),
+            SecurityLevel::TopSecret,
+            uuid::Uuid::nil(),
+        )
+        .owned_by(token)
+    };
+
+    // The winner acquires the lease, then publishes its artifact through the fence.
+    storage
+        .store(
+            &SecretEntry::new(
+                lease.to_string(),
+                b"winner".to_vec(),
+                secreton_storage::EncryptionMetadata::default(),
+                SecurityLevel::Internal,
+                uuid::Uuid::nil(),
+            )
+            .owned_by("winner"),
+        )
+        .await
+        .expect("store lease");
+    assert!(
+        storage
+            .store_fenced(
+                &entry("winner", b"winner-artifact"),
+                secreton_storage::StorageFence::new(lease, "winner")
+            )
+            .await
+            .expect("fenced write by the holder"),
+        "the holder of the lease must be able to publish its artifact"
+    );
+    let winner_id = storage
+        .get_by_path(artifact)
+        .await
+        .expect("read")
+        .expect("the winner's artifact is present")
+        .id;
+
+    // A stale attempt — fenced on a lease it no longer holds — must write nothing, and in
+    // particular must not repoint the path mapping at its own record.
+    assert!(
+        !storage
+            .store_fenced(
+                &entry("stale", b"stale-artifact"),
+                secreton_storage::StorageFence::new(lease, "stale")
+            )
+            .await
+            .expect("fenced write by a stale holder"),
+        "an attempt whose fence token is not the lease's must not write"
+    );
+
+    let resolved = storage
+        .get_by_path(artifact)
+        .await
+        .expect("read")
+        .expect("the winner's artifact must still resolve by path");
+    assert_eq!(
+        resolved.id, winner_id,
+        "the path mapping must still name the winner's record"
+    );
+    assert_eq!(
+        resolved.encrypted_data, b"winner-artifact",
+        "the winner's artifact must not have been overwritten"
+    );
+
+    // And a fence whose lease record is gone entirely also refuses — absence is not consent.
+    storage.delete_by_path(lease).await.expect("remove lease");
+    assert!(
+        !storage
+            .store_fenced(
+                &entry("winner", b"after-release"),
+                secreton_storage::StorageFence::new(lease, "winner")
+            )
+            .await
+            .expect("fenced write after the lease is gone"),
+        "a fence with no lease record must refuse, not fail open"
     );
 }
 

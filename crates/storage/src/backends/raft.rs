@@ -574,6 +574,24 @@ impl StorageBackend for RaftStorageBackend {
         })
     }
 
+    /// Refused rather than faked, for the same reason as [`Self::compare_and_set`].
+    ///
+    /// A fence is only meaningful against a shared record, and this backend's state machine
+    /// is a process-local map that no second replica observes. A `store_fenced` here could
+    /// only check its own memory, which would report success to a caller that believes it
+    /// holds a cross-process lease it does not — the fake-lock failure mode. It refuses so
+    /// the seal service fails closed instead.
+    async fn store_fenced(
+        &self,
+        _entry: &SecretEntry,
+        _fence: crate::StorageFence<'_>,
+    ) -> StorageResult<bool> {
+        Err(StorageError::Unsupported {
+            operation: "store_fenced".to_string(),
+            backend: "raft".to_string(),
+        })
+    }
+
     async fn list(&self, params: &QueryParams) -> StorageResult<Vec<SecretEntry>> {
         debug!("Listing entries with params: {:?}", params);
 

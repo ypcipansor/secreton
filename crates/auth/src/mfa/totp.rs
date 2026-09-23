@@ -58,13 +58,20 @@ pub trait TotpService: Send + Sync {
     /// without one is invisible to that path on a shared backend, which is what left an
     /// orphaned second factor behind a rollback that reported success. Backends without a
     /// conditional delete ignore the token and delegate to `enroll`.
+    ///
+    /// When `fence` is supplied the write is performed *through* it — the enrollment lands
+    /// only while the named durable record still carries the token — so a caller that has
+    /// lost its lease cannot write an enrollment at all. `owner` alone would only make the
+    /// record removable afterwards; it would not stop the stale write. Backends without a
+    /// fenced write must refuse rather than fall back to an unconditional store.
     async fn enroll_owned(
         &self,
         entity_id: Uuid,
         account_name: String,
         owner: Option<&str>,
+        fence: Option<secreton_storage::StorageFence<'_>>,
     ) -> Result<TotpEnrollment, SecretonError> {
-        let _ = owner;
+        let _ = (owner, fence);
         self.enroll(entity_id, account_name).await
     }
 

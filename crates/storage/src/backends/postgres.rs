@@ -2,7 +2,7 @@
 
 use crate::{
     Coordination, HealthStatus, QueryParams, SecretEntry, SecurityLevel, StorageBackend,
-    StorageError, StorageResult, StorageStats, StorageTransaction,
+    StorageError, StorageFence, StorageResult, StorageStats, StorageTransaction,
 };
 use async_trait::async_trait;
 use deadpool_postgres::{Config, Pool, Runtime};
@@ -414,9 +414,22 @@ impl StorageBackend for PostgresBackend {
                 updated_at = EXCLUDED.updated_at,
                 expires_at = EXCLUDED.expires_at"#;
 
-        let base = "INSERT INTO secreton_entries \
-            (id, path, encrypted_data, encryption_metadata, security_level, metadata, tags, version, owner_id, created_at, updated_at, expires_at) \
-            VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)";
+        let insert_columns = "INSERT INTO secreton_entries \
+            (id, path, encrypted_data, encryption_metadata, security_level, metadata, tags, version, owner_id, created_at, updated_at, expires_at)";
+        let insert_values = "VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)";
+        let base = format!("{insert_columns} {insert_values}");
+        // The insert arm of the owner case must never fire: an `ON CONFLICT` clause only
+        // applies when the insert actually conflicts, so a bare owner-conditional `UPDATE`
+        // left the plain INSERT path open — a write to an *absent* path then succeeded and
+        // reported `Ok(true)`. A precondition that is satisfied by the absence of the record
+        // it constrains is a precondition that fails open, and it did so on the one backend
+        // where a lost race is most expensive. `WHERE false` on a `SELECT`-form insert makes
+        // the arm unsatisfiable, so an absent row yields zero rows affected, which the caller
+        // reads as "the precondition did not hold".
+        let owner_only_base = format!(
+            "{insert_columns} \
+             SELECT $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12 WHERE false"
+        );
 
         let query = match expect {
             crate::Expect::Absent => format!("{base} ON CONFLICT (path) DO NOTHING"),
@@ -424,7 +437,7 @@ impl StorageBackend for PostgresBackend {
             crate::Expect::Owner(_) => {
                 // The owner key is a compile-time constant, not interpolated input.
                 format!(
-                    "{base} ON CONFLICT (path) DO UPDATE SET{update_set} \
+                    "{owner_only_base} ON CONFLICT (path) DO UPDATE SET{update_set} \
                      WHERE secreton_entries.metadata->>'{owner}' = $13",
                     owner = crate::OWNER_TOKEN_KEY
                 )
@@ -487,6 +500,98 @@ impl StorageBackend for PostgresBackend {
             .await
             .map_err(|e| StorageError::QueryFailed {
                 message: format!("Failed to delete owned secreton entry: {}", e),
+            })?;
+
+        Ok(rows_affected > 0)
+    }
+
+    /// Fenced write as a single statement, so the fence and the write cannot interleave.
+    ///
+    /// The insert is `SELECT ... WHERE EXISTS (<fence row still carries the token>)`, and
+    /// the conflict arm repeats the same `WHERE EXISTS` inside its own update condition.
+    /// PostgreSQL evaluates both against the statement's snapshot, so the fence is read and
+    /// the artifact is written in one indivisible step: a concurrent transaction that takes
+    /// the lease over either commits before this statement (which then sees the other token
+    /// and writes nothing) or after (in which case this statement already committed the write
+    /// while it demonstrably held the lease). There is no window between a read of the lease
+    /// and the write of the artifact for a takeover to slip into, which is exactly the
+    /// window the plain `store` left open.
+    async fn store_fenced(
+        &self,
+        entry: &SecretEntry,
+        fence: StorageFence<'_>,
+    ) -> StorageResult<bool> {
+        let client = self
+            .pool
+            .get()
+            .await
+            .map_err(|e| StorageError::ConnectionFailed {
+                message: format!("Failed to get connection: {}", e),
+            })?;
+
+        let encryption_metadata_json =
+            serde_json::to_value(&entry.encryption_metadata).map_err(|e| {
+                StorageError::SerializationError {
+                    message: format!("Failed to serialize encryption metadata: {}", e),
+                }
+            })?;
+        let metadata_json = serde_json::to_value(&entry.metadata).map_err(|e| {
+            StorageError::SerializationError {
+                message: format!("Failed to serialize metadata: {}", e),
+            }
+        })?;
+
+        let update_set = r#"
+                encrypted_data = EXCLUDED.encrypted_data,
+                encryption_metadata = EXCLUDED.encryption_metadata,
+                security_level = EXCLUDED.security_level,
+                metadata = EXCLUDED.metadata,
+                tags = EXCLUDED.tags,
+                version = EXCLUDED.version,
+                owner_id = EXCLUDED.owner_id,
+                updated_at = EXCLUDED.updated_at,
+                expires_at = EXCLUDED.expires_at"#;
+
+        // $13 = fence path, $14 = fence owner token. The owner key is a compile-time
+        // constant, never interpolated input.
+        let query = format!(
+            "INSERT INTO secreton_entries \
+             (id, path, encrypted_data, encryption_metadata, security_level, metadata, tags, version, owner_id, created_at, updated_at, expires_at) \
+             SELECT $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12 \
+             WHERE EXISTS (SELECT 1 FROM secreton_entries \
+                 WHERE path = $13 AND metadata->>'{owner}' = $14) \
+             ON CONFLICT (path) DO UPDATE SET{update_set} \
+             WHERE EXISTS (SELECT 1 FROM secreton_entries \
+                 WHERE path = $13 AND metadata->>'{owner}' = $14)",
+            owner = crate::OWNER_TOKEN_KEY
+        );
+
+        let security_level = entry.security_level as i32;
+        let version = entry.version as i32;
+
+        let rows_affected = client
+            .execute(
+                &query,
+                &[
+                    &entry.id,
+                    &entry.path,
+                    &entry.encrypted_data,
+                    &encryption_metadata_json,
+                    &security_level,
+                    &metadata_json,
+                    &entry.tags,
+                    &version,
+                    &entry.owner_id,
+                    &entry.created_at,
+                    &entry.updated_at,
+                    &entry.expires_at,
+                    &fence.path,
+                    &fence.token,
+                ],
+            )
+            .await
+            .map_err(|e| StorageError::QueryFailed {
+                message: format!("Failed to fenced-store secreton entry: {}", e),
             })?;
 
         Ok(rows_affected > 0)

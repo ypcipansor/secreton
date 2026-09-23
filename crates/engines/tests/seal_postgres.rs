@@ -264,6 +264,103 @@ async fn mfa_service(
     ))
 }
 
+/// `store_fenced` on PostgreSQL is a single statement whose `INSERT ... WHERE EXISTS` and
+/// conflict-arm `WHERE EXISTS` are evaluated against the statement's own snapshot, so the
+/// fence and the write cannot interleave. An attempt whose lease has been taken over must not
+/// publish an artifact — the pre-fix plain `store` did.
+#[tokio::test]
+async fn postgres_store_fenced_refuses_a_lost_lease_and_preserves_the_winner() {
+    let Some(url) = database_url() else {
+        return;
+    };
+    migrate_once(&url).await;
+    let backend = PostgresBackend::new(&url).await.expect("connect");
+    let storage: Arc<NamespacedBackend> = Arc::new(NamespacedBackend {
+        inner: backend,
+        prefix: format!("it/{}", uuid::Uuid::new_v4()),
+    });
+
+    let lease = "sys/init_lease";
+    let artifact = "sys/root_key_enc";
+    let entry = |token: &str, payload: &[u8]| {
+        secreton_storage::SecretEntry::new(
+            artifact.to_string(),
+            payload.to_vec(),
+            secreton_storage::EncryptionMetadata::default(),
+            secreton_storage::SecurityLevel::TopSecret,
+            uuid::Uuid::nil(),
+        )
+        .owned_by(token)
+    };
+
+    storage
+        .store(
+            &secreton_storage::SecretEntry::new(
+                lease.to_string(),
+                b"winner".to_vec(),
+                secreton_storage::EncryptionMetadata::default(),
+                secreton_storage::SecurityLevel::Internal,
+                uuid::Uuid::nil(),
+            )
+            .owned_by("winner"),
+        )
+        .await
+        .expect("store lease");
+
+    assert!(
+        storage
+            .store_fenced(
+                &entry("winner", b"winner-artifact"),
+                secreton_storage::StorageFence::new(lease, "winner")
+            )
+            .await
+            .expect("fenced write by the holder"),
+        "the holder of the lease must be able to publish its artifact"
+    );
+    let winner_id = storage
+        .get_by_path(artifact)
+        .await
+        .expect("read")
+        .expect("the winner's artifact is present")
+        .id;
+
+    assert!(
+        !storage
+            .store_fenced(
+                &entry("stale", b"stale-artifact"),
+                secreton_storage::StorageFence::new(lease, "stale")
+            )
+            .await
+            .expect("fenced write by a stale holder"),
+        "an attempt whose fence token is not the lease's must not write"
+    );
+
+    let resolved = storage
+        .get_by_path(artifact)
+        .await
+        .expect("read")
+        .expect("the winner's artifact must still resolve by path");
+    assert_eq!(
+        resolved.id, winner_id,
+        "the winner's record must be unchanged by a refused fenced write"
+    );
+    assert_eq!(resolved.encrypted_data, b"winner-artifact");
+
+    // A fence whose lease row is gone entirely also refuses: the `WHERE EXISTS` is unsatisfied
+    // and the conflict arm cannot fire, so nothing is written.
+    storage.delete_by_path(lease).await.expect("remove lease");
+    assert!(
+        !storage
+            .store_fenced(
+                &entry("winner", b"after-release"),
+                secreton_storage::StorageFence::new(lease, "winner")
+            )
+            .await
+            .expect("fenced write after the lease is gone"),
+        "a fence with no lease record must refuse, not fail open"
+    );
+}
+
 /// Prefix every path so one run owns an isolated namespace in a shared database. The
 /// service under test is path-keyed throughout, so re-scoping on the way in and out is all
 /// that is needed; the entry bodies are opaque to this wrapper.
@@ -349,6 +446,20 @@ impl StorageBackend for NamespacedBackend {
 
     async fn delete_owned(&self, path: &str, token: &str) -> secreton_storage::StorageResult<bool> {
         self.inner.delete_owned(&self.scope(path), token).await
+    }
+
+    /// Scoped like every other path-keyed operation, fence path included: the fence names the
+    /// lease record, and an unscoped fence would look for it outside the namespace.
+    async fn store_fenced(
+        &self,
+        entry: &secreton_storage::SecretEntry,
+        fence: secreton_storage::StorageFence<'_>,
+    ) -> secreton_storage::StorageResult<bool> {
+        let mut scoped = entry.clone();
+        scoped.path = self.scope(&entry.path);
+        let scoped_fence_path = self.scope(fence.path);
+        let scoped_fence = secreton_storage::StorageFence::new(&scoped_fence_path, fence.token);
+        self.inner.store_fenced(&scoped, scoped_fence).await
     }
 
     async fn list(

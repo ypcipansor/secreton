@@ -4,7 +4,7 @@
 
 use crate::{
     Coordination, HealthStatus, QueryParams, SecretEntry, StorageBackend, StorageError,
-    StorageResult, StorageStats, StorageTransaction,
+    StorageFence, StorageResult, StorageStats, StorageTransaction,
 };
 use async_trait::async_trait;
 use chrono::Utc;
@@ -395,6 +395,37 @@ impl StorageBackend for FileBackend {
                 message: format!("Failed to delete owned entry: {}", e),
             }),
         }
+    }
+
+    /// The fence read and the write happen while the advisory lock is held, so the check
+    /// and the publish cannot interleave with another process sharing this directory.
+    async fn store_fenced(
+        &self,
+        entry: &SecretEntry,
+        fence: StorageFence<'_>,
+    ) -> StorageResult<bool> {
+        let _guard = self.acquire_lock()?;
+
+        let holds = self
+            .get_by_path(fence.path)
+            .await?
+            .is_some_and(|held| held.has_owner(fence.token));
+        if !holds {
+            return Ok(false);
+        }
+
+        let existing = self.get_by_path(&entry.path).await?;
+        let to_write = match existing {
+            Some(old) => {
+                let mut updated = entry.clone();
+                updated.id = old.id;
+                updated.created_at = old.created_at;
+                updated
+            }
+            None => entry.clone(),
+        };
+        self.write_entry_atomically(&self.entry_path(to_write.id), &to_write)?;
+        Ok(true)
     }
 
     async fn list(&self, params: &QueryParams) -> StorageResult<Vec<SecretEntry>> {

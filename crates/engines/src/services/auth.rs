@@ -19,7 +19,7 @@ use secreton_auth::{
     User, UserPassAuthMethod,
 };
 use secreton_storage::{
-    EncryptionMetadata, QueryParams, SecretEntry, SecurityLevel, StorageBackend,
+    EncryptionMetadata, QueryParams, SecretEntry, SecurityLevel, StorageBackend, StorageFence,
 };
 use thiserror::Error;
 
@@ -1751,12 +1751,12 @@ impl AuthenticationService {
         roles: Vec<String>,
         permissions: Vec<String>,
     ) -> Result<User, AuthError> {
-        self.register_bootstrap_root_owned(username, email, roles, permissions, None)
+        self.register_bootstrap_root_owned(username, email, roles, permissions, None, None)
             .await
     }
 
     /// [`Self::register_bootstrap_root`], stamping the persisted account with an owner
-    /// token.
+    /// token and optionally fencing the write.
     ///
     /// Initialization passes its cross-process lease token here so a failed attempt's
     /// cleanup can remove the account it created: on a shared backend the cleanup deletes
@@ -1764,6 +1764,12 @@ impl AuthenticationService {
     /// written without one is invisible to that path, so the rollback would leave a
     /// privileged account behind while reporting success. Callers outside initialization
     /// pass `None`, the same way the ordinary MFA setup path leaves an enrollment unowned.
+    ///
+    /// When `fence` is supplied the account is written through
+    /// [`StorageBackend::store_fenced`], so the write itself only lands while the
+    /// initialization still holds the lease it names. The owner token alone would only make
+    /// the account removable afterwards; the fence is what stops an attempt that has already
+    /// lost the lease from creating a privileged account at all.
     pub async fn register_bootstrap_root_owned(
         &self,
         username: &str,
@@ -1771,6 +1777,7 @@ impl AuthenticationService {
         roles: Vec<String>,
         permissions: Vec<String>,
         owner: Option<&str>,
+        fence: Option<StorageFence<'_>>,
     ) -> Result<User, AuthError> {
         let path = format!("{}{}", USER_STORAGE_PREFIX, username);
         if self.storage.exists(&path).await? {
@@ -1782,27 +1789,17 @@ impl AuthenticationService {
         // Register the identity with the userpass method so token issuance sees it, but
         // with no password hash and the flag set: there is nothing for a verifier to
         // accept even if the in-memory entry were tampered with.
-        self.userpass_method
-            .add_bootstrap_root(
-                username.to_string(),
-                user_id.clone(),
-                roles.clone(),
-                vec!["default".to_string()],
-                permissions.clone(),
-            )
-            .await;
-
-        let user = User {
-            id: user_id,
+        let account = User {
+            id: user_id.clone(),
             username: username.to_string(),
-            email,
+            email: email.clone(),
             password_hash: String::new(),
             password_login_disabled: true,
             full_name: None,
             is_active: true,
             is_superuser: true,
-            roles,
-            permissions,
+            roles: roles.clone(),
+            permissions: permissions.clone(),
             policies: vec!["default".to_string()],
             enabled: true,
             disabled: false,
@@ -1816,8 +1813,9 @@ impl AuthenticationService {
             failed_login_attempts: 0,
             locked_until: None,
         };
+        let user_id = account.id.clone();
 
-        let user_data = serde_json::to_vec(&user)
+        let user_data = serde_json::to_vec(&account)
             .map_err(|e| AuthError::Internal(anyhow::anyhow!("Serialization error: {}", e)))?;
         let encrypted_data = self.crypto.encrypt_data(&user_data).await.map_err(|e| {
             AuthError::Crypto(secreton_crypto::CryptoError::Internal(e.to_string()))
@@ -1827,15 +1825,47 @@ impl AuthenticationService {
             encrypted_data,
             EncryptionMetadata::default(),
             SecurityLevel::Secret,
-            Uuid::parse_str(&user.id).unwrap_or_default(),
+            Uuid::parse_str(&account.id).unwrap_or_default(),
         );
         let entry = match owner {
             Some(owner) => entry.owned_by(owner),
             None => entry,
         };
-        self.storage.store(&entry).await?;
 
-        Ok(user)
+        // The write comes first, and the in-memory userpass identity only second. The other
+        // order registers a login identity in memory for an account whose durable write then
+        // fails — a login that works until the process restarts, and, on the fenced path, a
+        // login for an attempt that had already lost its lease.
+        match fence {
+            Some(fence) => {
+                let written = self
+                    .storage
+                    .store_fenced(&entry, fence)
+                    .await
+                    .map_err(AuthError::Storage)?;
+                if !written {
+                    return Err(AuthError::Internal(anyhow::anyhow!(
+                        "the initialization lease was lost before the root account could \
+                         be written"
+                    )));
+                }
+            }
+            None => {
+                self.storage.store(&entry).await?;
+            }
+        }
+
+        self.userpass_method
+            .add_bootstrap_root(
+                username.to_string(),
+                user_id,
+                roles,
+                vec!["default".to_string()],
+                permissions,
+            )
+            .await;
+
+        Ok(account)
     }
 
     /// Mark an existing account as not password-authenticatable, in storage *and* in the

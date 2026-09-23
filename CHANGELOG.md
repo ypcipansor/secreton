@@ -95,6 +95,18 @@ and ~59k, and from not compiling at all to a green build with a full test suite.
   root key. Initialization is now staged: a marker is written first and removed last, a
   failure rolls the partial state back, and the vault is re-initialisable without a restart
   or manual cleanup.
+- **An initialization attempt that lost its cross-process lease could still overwrite the
+  winner's root key.** Every durable write of the sequence was authorised by a preceding
+  check against an in-process flag, so an attempt whose lease had expired and been taken
+  over could pass that check and write afterwards — and on Redis the write repointed the
+  path mapping, leaving the winner's returned shares unable to open the root key the path
+  resolved to. Artifact writes now go through `StorageBackend::store_fenced`, which makes
+  the write itself conditional on the lease record still carrying the attempt's token, in
+  one step in the shared backend: PostgreSQL evaluates the insert and the conflict arm
+  against the lease row in a single statement, Redis in one Lua script, and the file
+  backend under an OS advisory lock. A backend that cannot enforce a fence returns
+  `StorageError::Unsupported` and `init` treats that as a hard failure rather than falling
+  back to an unconditional write.
 
 ### Removed
 

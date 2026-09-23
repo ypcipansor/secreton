@@ -153,12 +153,27 @@ pemenang; pemanggilan lainnya ditolak dengan aman.
 Jaminan lintas proses bergantung pada kemampuan backend, yang dinyatakan oleh
 `StorageBackend::coordination()`. Backend yang memang bisa dipakai bersama
 (`CrossProcess` — PostgreSQL, Redis, file dengan direktori bersama) mengimplementasikan
-`compare_and_set` dan `delete_owned` secara atomik; `init` mengambil lease di
-`sys/init_lease` dengan insert-if-absent (`Expect::Absent`), yang hanya dapat dimenangkan
+`compare_and_set`, `delete_owned`, dan `store_fenced` secara atomik; `init` mengambil lease
+di `sys/init_lease` dengan insert-if-absent (`Expect::Absent`), yang hanya dapat dimenangkan
 satu pemanggil, dan melepasnya di akhir dengan `delete_owned` yang hanya berlaku selama
 lease itu masih miliknya. Lease yang kedaluwarsa boleh diambil alih hanya lewat penulisan
 bersyarat terhadap token pemilik yang benar-benar ada, sehingga replika yang mati di tengah
 inisialisasi tidak memblokir recovery selamanya dan lease yang masih hidup tidak dicuri.
+
+Setiap penulisan artefak initialization (`sys/init`, root key terenkripsi, akun bootstrap,
+enrollment TOTP, root identity, staging marker, dan commit) memakai `store_fenced`, bukan
+`store` yang didahului sebuah pemeriksaan. Perbedaannya penting: `check()` hanya membaca
+flag in-memory, jadi sebuah attempt dapat kehilangan lease tepat setelah check-nya lulus dan
+tetap menulis — dan pada Redis penulisan itu menyetel ulang mapping `path`, sehingga shares
+yang dikembalikan pemenang tidak lagi membuka root key yang diselesaikan path tersebut.
+`store_fenced` memindahkan precondition ke dalam penulisan itu sendiri, di backend bersama:
+fence menamai record lease dan token attempt, dan backend mengevaluasi keduanya bersama
+penulisan sebagai satu langkah tak terbagi. Attempt yang sudah kehilangan lease karena itu
+tidak dapat menulis sama sekali; tidak ada API yang dapat dipakai untuk menulis tanpa fence
+aktif. Backend yang tidak mampu menegakkan fence menolak operasi ini dengan
+`StorageError::Unsupported`, dan `init` memperlakukannya sebagai kegagalan keras alih-alih
+kembali ke penulisan tanpa syarat.
+
 Rollback, commit, dan penghapusan marker juga bersyarat pada token pemilik, jadi cleanup
 yang basi tidak dapat menghapus artefak percobaan yang lebih baru. Backend yang tidak dapat
 memisahkan proses (`SingleProcess` — memory, Raft single-node) melaporkan demikian, dan
@@ -166,8 +181,10 @@ mutex dalam proses adalah jaminan lengkapnya karena tidak ada replika kedua yang
 berbagi backend itu.
 
 Semua backend `CrossProcess` memakai compare-and-set yang benar-benar atomik: PostgreSQL
-memakai `ON CONFLICT ... DO UPDATE ... WHERE` dalam satu statement, Redis memakai satu
-skrip Lua, dan file memakai OS advisory lock serta rename atomik. Tidak ada implementasi
+memakai `ON CONFLICT ... DO UPDATE ... WHERE` dalam satu statement (dan `store_fenced`
+memakai `INSERT ... WHERE EXISTS` pada record lease dengan `WHERE EXISTS` yang sama di arm
+konflik), Redis memakai satu skrip Lua untuk operasi maupun fence, dan file memakai OS
+advisory lock serta rename atomik. Tidak ada implementasi
 yang memakai `upsert` read-then-write (yang tidak atomik) sebagai kunci, dan backend yang
 tidak mampu mengembalikan `StorageError::Unsupported` alih-alih kunci palsu — `init`
 memperlakukannya sebagai kegagalan keras.

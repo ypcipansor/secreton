@@ -4604,6 +4604,7 @@ dependencies = [
  "reqwest",
  "secreton-crypto",
  "secreton-domain",
+ "secreton-storage",
  "serde",
  "serde_json",
  "sha1",

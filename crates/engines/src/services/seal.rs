@@ -166,14 +166,22 @@ fn lease_entry(owner: &str, ttl_secs: u64) -> SecretEntry {
 /// A fixed expiry alone is not enough. If an attempt runs longer than its TTL, a second
 /// replica may legitimately take the lease over while the first is still writing; the first
 /// then keeps overwriting the second's artifacts and can hand its caller shares that do not
-/// open the root key that ends up stored. Renewal closes that window, and the fence closes
-/// the residual one: every write *and* the commit consult [`Self::check`], so an attempt
-/// that has lost its lease cannot publish anything, whether it was taken over or its own
-/// renewal failed. Loss is always fail-closed: an attempt that cannot prove it still holds
-/// the lease stops rather than racing.
+/// open the root key that ends up stored. Renewal redraws the window, but renewal alone is
+/// not the guarantee: renewal is a background task, so a renewal that fails is only noticed
+/// on the *next* write's [`Self::check`], and an attempt can be fenced the instant after a
+/// check passes. The guarantee is [`Self::fence`], which makes every durable write
+/// conditional in the shared backend on this record still carrying this token — so a write
+/// either lands while the attempt demonstrably holds the lease, or it does not land at all.
+/// Loss is always fail-closed: an attempt that cannot prove it still holds the lease stops
+/// rather than racing.
 struct InitLeaseGuard {
     owner: String,
     /// Set once this attempt has lost the lease — taken over, or a renewal failed.
+    ///
+    /// This is a *hint*, never the guarantee: it is set asynchronously by the renewal task,
+    /// so it can lag the durable truth. [`Self::check`] uses it to fail fast and to stop the
+    /// sequence early, but no write is ever authorised by its absence — that is
+    /// [`Self::fence`]'s job.
     lost: Arc<AtomicBool>,
     /// Renewal task. `None` on a single-process backend, where no lease record exists.
     renewal: Option<tokio::task::JoinHandle<()>>,
@@ -186,10 +194,14 @@ impl InitLeaseGuard {
         &self.owner
     }
 
-    /// Fail closed if this attempt no longer holds the lease.
+    /// Fail closed if this attempt believes it no longer holds the lease.
     ///
-    /// Called before every durable write of the initialization sequence and before the
-    /// commit, so a fenced attempt cannot write or commit anything after losing the lease.
+    /// A cheap early-out over the in-process loss flag, called before each durable write so
+    /// an attempt that already knows it is fenced stops promptly. It is deliberately **not**
+    /// the guarantee: the flag is set by the renewal task and can lag a takeover, and the
+    /// two are separated by an arbitrary window in which the attempt would still see
+    /// "not lost". Nothing may be authorised by this call returning `Ok`. That is
+    /// [`Self::fence`]'s job, and it is why every durable write of the sequence is fenced.
     fn check(&self) -> Result<()> {
         if self.lost.load(Ordering::SeqCst) {
             return Err(anyhow!(
@@ -198,6 +210,28 @@ impl InitLeaseGuard {
             ));
         }
         Ok(())
+    }
+
+    /// The fence every durable write of this attempt must go through.
+    ///
+    /// Names the lease record and this attempt's token, so the backend can make the write
+    /// conditional on the record still being present and still carrying the token — as one
+    /// indivisible step. An attempt that has lost the lease cannot use this to write, and
+    /// there is no way to obtain a value that would let it: the token is this attempt's, and
+    /// a takeover replaces the record's token, which is exactly what the backend compares.
+    ///
+    /// On a single-process backend no lease record exists. There is no peer to take anything
+    /// over, so the in-process lock and [`Self::check`] are the whole guarantee and the fence
+    /// degrades to them; the returned option is `None` there. It is `Some` whenever a record
+    /// backs the lease, which is every backend that can be shared between replicas.
+    fn fence(&self) -> Option<secreton_storage::StorageFence<'_>> {
+        if !self.holds_record {
+            return None;
+        }
+        Some(secreton_storage::StorageFence::new(
+            INIT_LEASE_PATH,
+            &self.owner,
+        ))
     }
 
     /// Stop the renewal task. Idempotent, and called on every return path of `init`.
@@ -471,12 +505,42 @@ impl SealService {
             Ok(response) => Ok(response),
             Err(e) => {
                 // The caller gets the original error, but not before the partial state is
-                // removed so the next attempt starts clean. The lock and the lease are
-                // still held, so no concurrent attempt can be observing the state being
-                // rolled back.
-                self.discard_partial_initialization().await;
+                // removed so the next attempt starts clean. The lock is still held, so no
+                // concurrent attempt on this instance is observing the state being rolled back.
+                //
+                // The cleanup runs only while this attempt still durably holds its lease. A
+                // taken-over attempt must not roll anything back: the artifacts now in
+                // storage belong to the attempt that took the lease over, and the staging
+                // marker it would read names *that* attempt — so an unguarded cleanup would
+                // delete the winner's root key, account and identity on the way to reporting a
+                // failure. That is the opposite of the invariant the lease exists to provide:
+                // a losing attempt must change nothing of the winner's.
+                if self.lease_still_held(lease).await {
+                    self.discard_partial_initialization().await;
+                } else {
+                    tracing::warn!(
+                        "Not rolling back a failed initialization: it no longer holds its \
+                         lease, so the durable state belongs to the attempt that took over."
+                    );
+                }
                 Err(e)
             }
+        }
+    }
+
+    /// Whether this attempt still durably holds the lease record it acquired.
+    ///
+    /// A read of the shared record, not the in-process loss flag: the flag is set
+    /// asynchronously by the renewal task and can lag a takeover, so it cannot decide whether
+    /// it is safe to delete state. On a single-process backend there is no record and no peer,
+    /// so the in-process view is the whole truth and this reports `true`.
+    async fn lease_still_held(&self, lease: &InitLeaseGuard) -> bool {
+        if !lease.holds_record {
+            return true;
+        }
+        match self.storage.get_by_path(INIT_LEASE_PATH).await {
+            Ok(Some(record)) => record.has_owner(lease.owner()),
+            _ => false,
         }
     }
 
@@ -707,10 +771,10 @@ impl SealService {
         // 5. Staging marker, before any durable artifact of this initialization.
         //
         // Every durable write from here is fenced on the lease: an attempt that has been
-        // taken over, or whose renewal failed, must not publish an artifact. `write_staging`
-        // already fails closed against a foreign owner; `check` extends that to the writes
-        // that go through `store` and to the commit.
-        lease.check()?;
+        // taken over, or whose renewal failed, must not publish an artifact. `store_artifact`
+        // makes each write conditional on the lease record in the shared backend, so a stale
+        // attempt cannot publish even in the window between a `check` and the write that
+        // follows it.
         self.write_staging(
             &InitStaging {
                 root_username: root_username.to_string(),
@@ -718,7 +782,7 @@ impl SealService {
                 committed: false,
                 owner: Some(lease_token.to_string()),
             },
-            lease_token,
+            lease,
         )
         .await?;
 
@@ -726,39 +790,44 @@ impl SealService {
         let config = InitConfig { shares, threshold };
         let config_bytes = serde_json::to_vec(&config)?;
 
-        lease.check()?;
-        self.storage
-            .store(
-                &SecretEntry::new(
-                    INIT_PATH.to_string(),
-                    config_bytes,
-                    EncryptionMetadata::default(),
-                    SecurityLevel::Public,
-                    Uuid::nil(),
-                )
-                .owned_by(lease_token),
+        self.store_artifact(
+            SecretEntry::new(
+                INIT_PATH.to_string(),
+                config_bytes,
+                EncryptionMetadata::default(),
+                SecurityLevel::Public,
+                Uuid::nil(),
             )
-            .await
-            .map_err(|e| anyhow!("Failed to store init config: {}", e))?;
+            .owned_by(lease_token),
+            lease,
+        )
+        .await
+        .map_err(|e| anyhow!("Failed to store init config: {}", e))?;
 
         // 7. Store Encrypted Root Key
+        //
+        // This is the write the finding names. On Redis the former unconditional `store` set
+        // `secreton:path:sys/root_key` to this attempt's id, so a holder that had already lost
+        // the lease still repointed the mapping the winning attempt had installed — the
+        // winner's returned shares then did not open the root key the path resolved to. The
+        // fenced write replaces this atomically while, and only while, the lease is still
+        // this attempt's, so a lost lease means the write does not happen at all.
         let enc_root_bytes = serde_json::to_vec(&EncryptedRootKey {
             data: encrypted_root,
         })?;
-        lease.check()?;
-        self.storage
-            .store(
-                &SecretEntry::new(
-                    ROOT_KEY_PATH.to_string(),
-                    enc_root_bytes,
-                    EncryptionMetadata::default(),
-                    SecurityLevel::TopSecret,
-                    Uuid::nil(),
-                )
-                .owned_by(lease_token),
+        self.store_artifact(
+            SecretEntry::new(
+                ROOT_KEY_PATH.to_string(),
+                enc_root_bytes,
+                EncryptionMetadata::default(),
+                SecurityLevel::TopSecret,
+                Uuid::nil(),
             )
-            .await
-            .map_err(|e| anyhow!("Failed to store root key: {}", e))?;
+            .owned_by(lease_token),
+            lease,
+        )
+        .await
+        .map_err(|e| anyhow!("Failed to store root key: {}", e))?;
 
         // 8. Format Response
         //
@@ -808,6 +877,7 @@ impl SealService {
                         vec!["root".to_string(), "admin".to_string()],
                         vec!["*".to_string()],
                         Some(lease_token),
+                        lease.fence(),
                     )
                     .await
                     .map_err(|e| anyhow!("Failed to create root user: {}", e))?;
@@ -824,21 +894,28 @@ impl SealService {
                         committed: false,
                         owner: Some(lease_token.to_string()),
                     },
-                    lease_token,
+                    lease,
                 )
                 .await?;
 
                 // Enable TOTP for Root
                 // IMPORTANT: Must be done BEFORE clearing the root key because PersistentTotpService encrypts the secret!
                 //
-                // The enrollment carries this attempt's lease token, so the cleanup below
-                // can remove it with the ownership-conditional delete it uses for every
-                // other artifact of this attempt. Without the token the enrollment is
-                // invisible to that delete on a shared backend, and a rollback that
-                // reported success would leave an orphaned second factor behind.
+                // The enrollment carries this attempt's lease token and is written through the
+                // fence, so (a) the cleanup below can remove it with the ownership-conditional
+                // delete it uses for every other artifact of this attempt, and (b) an attempt
+                // that has lost the lease cannot create the enrollment at all. The token
+                // alone would only make the record removable afterwards; the fence is what
+                // stops the stale write, and a stale write here is an orphaned second factor
+                // for a privileged account.
                 let user_uuid = Uuid::parse_str(&root_user.id).unwrap_or_default();
                 let totp_config = mfa
-                    .enable_totp_owned(user_uuid, root_user.username.clone(), Some(lease_token))
+                    .enable_totp_owned(
+                        user_uuid,
+                        root_user.username.clone(),
+                        Some(lease_token),
+                        lease.fence(),
+                    )
                     .await
                     .map_err(|e| anyhow!("Failed to enable TOTP for root user: {}", e))?;
 
@@ -855,20 +932,19 @@ impl SealService {
         // Persist the created root identity. Reading it back needs no key of its own — it
         // names an account, it does not authenticate one.
         let bytes = serde_json::to_vec(&root_identity)?;
-        lease.check()?;
-        self.storage
-            .store(
-                &SecretEntry::new(
-                    ROOT_IDENTITY_PATH.to_string(),
-                    bytes,
-                    EncryptionMetadata::default(),
-                    SecurityLevel::Internal,
-                    Uuid::nil(),
-                )
-                .owned_by(lease_token),
+        self.store_artifact(
+            SecretEntry::new(
+                ROOT_IDENTITY_PATH.to_string(),
+                bytes,
+                EncryptionMetadata::default(),
+                SecurityLevel::Internal,
+                Uuid::nil(),
             )
-            .await
-            .map_err(|e| anyhow!("Failed to store root identity: {}", e))?;
+            .owned_by(lease_token),
+            lease,
+        )
+        .await
+        .map_err(|e| anyhow!("Failed to store root identity: {}", e))?;
 
         // 10. Commit. Every durable artifact is now stored, so mark the staging entry as
         // committed *before* removing it. If the process dies between the two, the marker
@@ -879,7 +955,6 @@ impl SealService {
         // must not publish a committed marker, and must not hand its caller shares it can no
         // longer vouch for. Refusing here is what makes the property "the winning attempt's
         // shares open the stored root key" hold rather than "whichever attempt wrote last".
-        lease.check()?;
         self.write_staging(
             &InitStaging {
                 root_username: root_identity.username.clone(),
@@ -887,7 +962,7 @@ impl SealService {
                 committed: true,
                 owner: Some(lease_token.to_string()),
             },
-            lease_token,
+            lease,
         )
         .await?;
 
@@ -919,20 +994,75 @@ impl SealService {
         })
     }
 
+    /// Write one initialization artifact through the lease fence.
+    ///
+    /// Every durable artifact of the initialization sequence — init config, encrypted root
+    /// key, root account, TOTP enrollment, root identity — goes through here. The fence makes
+    /// the write conditional, *in the shared backend and in the same indivisible step*, on
+    /// the lease record still carrying this attempt's token. That is what closes the window
+    /// [`InitLeaseGuard::check`] cannot: a check is a snapshot, and an attempt can be fenced
+    /// the instant after it passes, so a write authorised only by a preceding check is a
+    /// write a taken-over attempt can still perform.
+    ///
+    /// Fails closed. A backend that reports cross-process coordination but cannot evaluate
+    /// the fence returns `Unsupported`, which is propagated as an error rather than falling
+    /// back to an unconditional `store` — the fallback would silently reintroduce the race
+    /// on exactly the backend that needs the fence. `Ok(false)` means the lease is gone: the
+    /// attempt must fail, not retry or write anyway.
+    ///
+    /// On a single-process backend no lease record exists and no peer can take one over, so
+    /// the in-process lock and [`InitLeaseGuard::check`] are the whole guarantee and the
+    /// write is a plain `store`.
+    async fn store_artifact(&self, entry: SecretEntry, lease: &InitLeaseGuard) -> Result<()> {
+        lease.check()?;
+        match lease.fence() {
+            Some(fence) => {
+                let written = self
+                    .storage
+                    .store_fenced(&entry, fence)
+                    .await
+                    .map_err(|e| anyhow!("Failed to store initialization artifact: {}", e))?;
+                if !written {
+                    return Err(anyhow!(
+                        "this initialization no longer holds its lease, so it must not write \
+                         '{}'",
+                        entry.path
+                    ));
+                }
+            }
+            None => {
+                // `upsert`, not `store`: the staging marker is written up to three times by
+                // one attempt, and a plain insert's behaviour on the repeat is not portable —
+                // a relational backend with `UNIQUE(path)` refuses it. `upsert` is an
+                // update-or-insert, so it carries the repeat. On a single-process backend no
+                // peer exists, so the in-process lock plus `check` is the whole guarantee and
+                // there is nothing to fence against.
+                self.storage
+                    .upsert(&entry)
+                    .await
+                    .map_err(|e| anyhow!("Failed to store initialization artifact: {}", e))?;
+            }
+        }
+        Ok(())
+    }
+
     /// Record initialization progress under [`INIT_STAGING_PATH`].
     ///
-    /// Uses [`StorageBackend::upsert`] rather than `store`: initialization writes this path
-    /// up to three times, and `store` is an insert whose behaviour on a repeat write is not
-    /// portable — PostgreSQL refuses the second insert on its `UNIQUE(path)` constraint
+    /// Uses a fenced replacement rather than a bare insert: initialization writes this path up
+    /// to three times, and a bare `store` is an insert whose behaviour on a repeat write is
+    /// not portable — PostgreSQL refuses the second insert on its `UNIQUE(path)` constraint
     /// while the in-memory backend accepts it, so initialization failed on PostgreSQL and
     /// passed in every test that used memory.
-    async fn write_staging(&self, staging: &InitStaging, lease: &str) -> Result<()> {
+    ///
+    /// The write is conditional on the *lease*, not on the marker. Conditioning on the
+    /// marker's own owner would authorise this attempt to insert a fresh marker whenever the
+    /// previous one had been cleared — which is exactly the state a takeover leaves behind.
+    /// An attempt that resumed after a winning attempt committed and cleared the marker would
+    /// then write its own uncommitted marker over a working vault, and a later recovery would
+    /// read it and discard that vault. Fencing on the lease makes the commit
+    /// ("only an attempt still holding the lease may publish") true for the marker too.
+    async fn write_staging(&self, staging: &InitStaging, lease: &InitLeaseGuard) -> Result<()> {
         let bytes = serde_json::to_vec(staging)?;
-        // `upsert` when no cross-process peer can exist; the owner-conditional
-        // `compare_and_set` otherwise. On a shared backend an unconditional upsert would
-        // let an attempt whose lease has expired overwrite the record a newer attempt now
-        // owns, so the write is made conditional on still owning it and a lost lease is
-        // surfaced as an error rather than publishing state this attempt cannot defend.
         let entry = SecretEntry::new(
             INIT_STAGING_PATH.to_string(),
             bytes,
@@ -940,48 +1070,9 @@ impl SealService {
             SecurityLevel::Internal,
             Uuid::nil(),
         )
-        .owned_by(lease);
+        .owned_by(lease.owner());
 
-        if self.storage.coordination() == secreton_storage::Coordination::SingleProcess {
-            return self
-                .storage
-                .upsert(&entry)
-                .await
-                .map_err(|e| anyhow!("Failed to record initialization progress: {}", e));
-        }
-
-        // Pick the atomic precondition from what is currently at the path. The read chooses
-        // between insert-if-absent and owner-conditional replace; it never performs the
-        // write, so a takeover between the read and the write is still caught by the
-        // backend's own comparison rather than by this call's stale view.
-        let existing = self
-            .storage
-            .get_by_path(INIT_STAGING_PATH)
-            .await
-            .map_err(|e| anyhow!("Failed to read initialization progress: {e}"))?;
-
-        let expect = match &existing {
-            None => secreton_storage::Expect::Absent,
-            Some(record) if record.has_owner(lease) => secreton_storage::Expect::Owner(lease),
-            Some(_) => {
-                return Err(anyhow!(
-                    "another initialization owns the staging marker; refusing to overwrite it"
-                ));
-            }
-        };
-
-        let written = self
-            .storage
-            .compare_and_set(&entry, expect)
-            .await
-            .map_err(|e| anyhow!("Failed to record initialization progress: {}", e))?;
-        if !written {
-            return Err(anyhow!(
-                "this initialization no longer owns its staging marker; another attempt \
-                 has taken over"
-            ));
-        }
-        Ok(())
+        self.store_artifact(entry, lease).await
     }
 
     /// Bring a vault that an interrupted `init` left behind to a state a retry can start
@@ -1186,6 +1277,14 @@ impl SealService {
     /// When `owner` is `Some`, a record that exists but carries a different owner token is
     /// left in place and reported as success — it belongs to an attempt that is not this
     /// one. That is what stops a stale cleanup from deleting a newer attempt's artifacts.
+    ///
+    /// When `owner` is `None` — a legacy marker with no token, or the crash path before this
+    /// attempt recorded one — a record that carries *any* owner token is left in place on a
+    /// backend that arbitrates between processes. An unowned cleanup is the one with the
+    /// least right to delete: it cannot name whose record it is looking at, so on a shared
+    /// backend it must not be allowed to remove a record that some attempt has claimed. The
+    /// fallback to an unconditional delete is for a record that genuinely has no owner, not
+    /// for one whose owner this call simply does not know.
     async fn remove_required(&self, path: &str, owner: Option<&str>) -> bool {
         // Ownership-scoped removal where a token is known and the backend can express it.
         // A single-process backend has no peers, so ownership is moot and a plain delete is
@@ -1217,6 +1316,29 @@ impl SealService {
                     );
                     return false;
                 }
+            }
+        } else if self.storage.coordination() != secreton_storage::Coordination::SingleProcess {
+            // Unowned removal on a shared backend. Refuse to remove a claimed record: this
+            // call cannot say whose it is, and deleting it would destroy the only root key a
+            // newer attempt's shares can open. A record with no owner token at all — the
+            // legacy shape — is still fair game, and the read-back below verifies the rest.
+            match self.storage.get_by_path(path).await {
+                Ok(Some(record)) if record.owner_token().is_some() => {
+                    tracing::warn!(
+                        "Refusing to remove '{}' during an unowned cleanup: the record is \
+                         owned by an attempt this cleanup cannot identify.",
+                        path
+                    );
+                    return true;
+                }
+                Ok(_) => {}
+                Err(e) => {
+                    tracing::error!("Could not read '{}' before an unowned cleanup: {}", path, e);
+                    return false;
+                }
+            }
+            if !self.delete_unconditionally(path).await {
+                return false;
             }
         } else if !self.delete_unconditionally(path).await {
             return false;
@@ -2124,6 +2246,19 @@ mod tests {
             }
             self.inner.store(entry).await
         }
+        /// The write the real path takes on a single-process backend, so the fault lands on
+        /// the same artifact regardless of which method carries it.
+        async fn upsert(&self, entry: &SecretEntry) -> StorageResult<()> {
+            if entry.path == self.path
+                && self.armed.swap(false, std::sync::atomic::Ordering::SeqCst)
+            {
+                return Err(secreton_storage::StorageError::BackendError {
+                    backend: "fault-injected".to_string(),
+                    message: "injected one-shot store failure".to_string(),
+                });
+            }
+            self.inner.upsert(entry).await
+        }
 
         async fn get_by_id(&self, id: Uuid) -> StorageResult<Option<SecretEntry>> {
             self.inner.get_by_id(id).await
@@ -2221,8 +2356,9 @@ mod tests {
             }
         }
 
-        /// Park the first write to the watched path. Both `store` and `upsert` route
-        /// through here because `write_staging` uses `upsert`.
+        /// Park the first write to the watched path. `store`, `upsert` and `store_fenced`
+        /// all route through here, because which of them carries a given write depends on the
+        /// backend's coordination class and the caller should not have to know.
         async fn maybe_pause(&self, path: &str) {
             if path == self.pause_on
                 && self
@@ -2241,6 +2377,14 @@ mod tests {
         async fn store(&self, entry: &SecretEntry) -> StorageResult<()> {
             self.maybe_pause(&entry.path).await;
             self.inner.store(entry).await
+        }
+        async fn store_fenced(
+            &self,
+            entry: &SecretEntry,
+            fence: secreton_storage::StorageFence<'_>,
+        ) -> StorageResult<bool> {
+            self.maybe_pause(&entry.path).await;
+            self.inner.store_fenced(entry, fence).await
         }
 
         async fn get_by_id(&self, id: Uuid) -> StorageResult<Option<SecretEntry>> {
@@ -3679,10 +3823,55 @@ mod tests {
                     message: "injected staging failure after TOTP enrollment".to_string(),
                 });
             }
-            // The staging write goes through this path on a cross-process backend, so the
-            // pause has to be here for a test to park an attempt inside its write sequence.
+            // A one-shot staging fault, but only once the enrollment exists, so the failure
+            // lands in the window where the account and its second factor are already stored
+            // and cleanup must remove them.
+            if entry.path == INIT_STAGING_PATH
+                && self
+                    .fail_staging_after_totp
+                    .load(std::sync::atomic::Ordering::SeqCst)
+                && self.totp_exists().await
+                && self
+                    .fail_staging_after_totp
+                    .swap(false, std::sync::atomic::Ordering::SeqCst)
+            {
+                self.staging_fault_fired
+                    .store(true, std::sync::atomic::Ordering::SeqCst);
+                return Err(secreton_storage::StorageError::BackendError {
+                    backend: "fault-injected".to_string(),
+                    message: "injected staging failure after TOTP enrollment".to_string(),
+                });
+            }
             self.maybe_pause(&entry.path).await;
             self.inner.compare_and_set(entry, expect).await
+        }
+        /// The staging write and every artifact now take this path on a cross-process
+        /// backend, so both the park hook and the staging fault live here. This is also the
+        /// operation the finding is about: it is what makes a write conditional on the lease
+        /// in the same step, closing the window between a `check` and the write it follows.
+        async fn store_fenced(
+            &self,
+            entry: &SecretEntry,
+            fence: secreton_storage::StorageFence<'_>,
+        ) -> StorageResult<bool> {
+            if entry.path == INIT_STAGING_PATH
+                && self
+                    .fail_staging_after_totp
+                    .load(std::sync::atomic::Ordering::SeqCst)
+                && self.totp_exists().await
+                && self
+                    .fail_staging_after_totp
+                    .swap(false, std::sync::atomic::Ordering::SeqCst)
+            {
+                self.staging_fault_fired
+                    .store(true, std::sync::atomic::Ordering::SeqCst);
+                return Err(secreton_storage::StorageError::BackendError {
+                    backend: "fault-injected".to_string(),
+                    message: "injected staging failure after TOTP enrollment".to_string(),
+                });
+            }
+            self.maybe_pause(&entry.path).await;
+            self.inner.store_fenced(entry, fence).await
         }
         async fn delete_owned(&self, path: &str, token: &str) -> StorageResult<bool> {
             self.inner.delete_owned(path, token).await
@@ -3979,6 +4168,352 @@ mod tests {
         assert_eq!(
             claims_of(&complete.root_token.expect("root credential"))["username"],
             "cross-root"
+        );
+    }
+
+    /// The failure mode the finding names, made deterministic.
+    ///
+    /// Instance A is parked inside its write of [`ROOT_KEY_PATH`] — staged, past the
+    /// `is_initialized` guard, having just passed the `check` that precedes that write — while
+    /// its lease is expired and taken over. Instance B then takes the lease, discards A's
+    /// partial state and completes an initialization of its own. When A is resumed it must
+    /// fail closed: it may not publish a root key, and it may not roll back what is now B's.
+    ///
+    /// The takeover is *forced*, not raced. When A writes the locked root key this backend
+    /// (a) replaces the lease record with one already in the past, so B's acquisition sees a
+    /// genuinely expired lease and takes it over legitimately, and (b) refuses A's renewals
+    /// from then on, so A's own background task cannot redraw its expiry before B arrives.
+    /// No test here sleeps, and none depends on the scheduler interleaving two tasks.
+    #[derive(Debug)]
+    struct LeaseTakeoverBackend {
+        inner: Arc<MemoryBackend>,
+        /// Path whose first write parks the holder and triggers the forced expiry.
+        pause_on: String,
+        reached: tokio::sync::Notify,
+        resume: tokio::sync::Notify,
+        started: std::sync::atomic::AtomicUsize,
+        /// Set once the lease has been forcibly expired and the holder must not renew.
+        expiry_forced: std::sync::atomic::AtomicBool,
+    }
+
+    impl LeaseTakeoverBackend {
+        fn new(pause_on: &str) -> Self {
+            Self {
+                inner: Arc::new(MemoryBackend::new()),
+                pause_on: pause_on.to_string(),
+                reached: tokio::sync::Notify::new(),
+                resume: tokio::sync::Notify::new(),
+                started: std::sync::atomic::AtomicUsize::new(0),
+                expiry_forced: std::sync::atomic::AtomicBool::new(false),
+            }
+        }
+
+        /// Expire the lease record in place, keeping the same owner token.
+        ///
+        /// The token is preserved so that nothing but the expiry changes: A's fence would
+        /// still match if the write were merely conditional on the token, which is the point
+        /// — the guarantee must come from B having replaced the record, and the expiry is what
+        /// lets B do that legitimately. It also keeps this helper from standing in for the
+        /// takeover itself.
+        async fn force_expiry(&self) {
+            let current = self
+                .inner
+                .get_by_path(INIT_LEASE_PATH)
+                .await
+                .expect("storage")
+                .expect("the holder must have a lease record to expire");
+            let owner = current
+                .owner_token()
+                .expect("the lease record carries its owner token")
+                .to_string();
+            let expired = SecretEntry::new(
+                INIT_LEASE_PATH.to_string(),
+                serde_json::to_vec(&InitLease {
+                    owner: owner.clone(),
+                    expires_at: Utc::now().timestamp() - 1,
+                })
+                .expect("serialise expired lease"),
+                EncryptionMetadata::default(),
+                SecurityLevel::Internal,
+                Uuid::nil(),
+            )
+            .owned_by(&owner);
+            self.inner
+                .upsert(&expired)
+                .await
+                .expect("expire the lease record");
+            self.expiry_forced
+                .store(true, std::sync::atomic::Ordering::SeqCst);
+        }
+    }
+
+    #[async_trait::async_trait]
+    impl StorageBackend for LeaseTakeoverBackend {
+        fn coordination(&self) -> secreton_storage::Coordination {
+            secreton_storage::Coordination::CrossProcess
+        }
+        async fn store(&self, entry: &SecretEntry) -> StorageResult<()> {
+            self.inner.store(entry).await
+        }
+        async fn upsert(&self, entry: &SecretEntry) -> StorageResult<()> {
+            self.inner.upsert(entry).await
+        }
+        async fn get_by_id(&self, id: Uuid) -> StorageResult<Option<SecretEntry>> {
+            self.inner.get_by_id(id).await
+        }
+        async fn get_by_path(&self, path: &str) -> StorageResult<Option<SecretEntry>> {
+            self.inner.get_by_path(path).await
+        }
+        async fn update(&self, entry: &SecretEntry) -> StorageResult<()> {
+            self.inner.update(entry).await
+        }
+        async fn delete_by_id(&self, id: Uuid) -> StorageResult<bool> {
+            self.inner.delete_by_id(id).await
+        }
+        async fn delete_by_path(&self, path: &str) -> StorageResult<bool> {
+            self.inner.delete_by_path(path).await
+        }
+        async fn delete_owned(&self, path: &str, token: &str) -> StorageResult<bool> {
+            self.inner.delete_owned(path, token).await
+        }
+        async fn compare_and_set(
+            &self,
+            entry: &SecretEntry,
+            expect: Expect<'_>,
+        ) -> StorageResult<bool> {
+            // Once the forced expiry is armed, refuse *the holder's own renewal* — an
+            // ownership-conditional replace that keeps the same token — so the expiry stays
+            // genuinely past for B. A takeover uses a different token, so it is allowed
+            // through; blocking that too would prevent B from ever taking over and would make
+            // this backend model "expired leases are unusable" instead of "expired leases are
+            // takeable", which is not the situation under test.
+            if entry.path == INIT_LEASE_PATH
+                && matches!(expect, Expect::Owner(_))
+                && self.expiry_forced.load(std::sync::atomic::Ordering::SeqCst)
+            {
+                let existing = self.inner.get_by_path(INIT_LEASE_PATH).await?;
+                if existing
+                    .as_ref()
+                    .is_some_and(|record| record.owner_token() == entry.owner_token())
+                {
+                    return Ok(false);
+                }
+            }
+            self.inner.compare_and_set(entry, expect).await
+        }
+        async fn store_fenced(
+            &self,
+            entry: &SecretEntry,
+            fence: secreton_storage::StorageFence<'_>,
+        ) -> StorageResult<bool> {
+            // Park the holder inside its first write of the watched path — for this test the
+            // encrypted root key, the artifact the finding names. The park is *before* the
+            // fence is evaluated, so the holder is released with its fence already stale.
+            if entry.path == self.pause_on
+                && self
+                    .started
+                    .fetch_add(1, std::sync::atomic::Ordering::SeqCst)
+                    == 0
+            {
+                self.force_expiry().await;
+                self.reached.notify_one();
+                self.resume.notified().await;
+            }
+            self.inner.store_fenced(entry, fence).await
+        }
+        async fn list(
+            &self,
+            params: &secreton_storage::QueryParams,
+        ) -> StorageResult<Vec<SecretEntry>> {
+            self.inner.list(params).await
+        }
+        async fn count(&self, params: &secreton_storage::QueryParams) -> StorageResult<u64> {
+            self.inner.count(params).await
+        }
+        async fn exists(&self, path: &str) -> StorageResult<bool> {
+            self.inner.exists(path).await
+        }
+        async fn begin_transaction(
+            &self,
+        ) -> StorageResult<Box<dyn secreton_storage::StorageTransaction>> {
+            self.inner.begin_transaction().await
+        }
+        async fn health_check(&self) -> StorageResult<secreton_storage::HealthStatus> {
+            self.inner.health_check().await
+        }
+        async fn get_stats(&self) -> StorageResult<secreton_storage::StorageStats> {
+            self.inner.get_stats().await
+        }
+        async fn migrate(&self) -> StorageResult<()> {
+            self.inner.migrate().await
+        }
+        async fn compact(&self) -> StorageResult<()> {
+            self.inner.compact().await
+        }
+        async fn vacuum(&self) -> StorageResult<()> {
+            self.inner.vacuum().await
+        }
+        async fn delete_expired(&self, path_prefix: Option<String>) -> StorageResult<u64> {
+            self.inner.delete_expired(path_prefix).await
+        }
+        async fn store_oauth_state(
+            &self,
+            state: &secreton_domain::OAuthState,
+        ) -> StorageResult<()> {
+            self.inner.store_oauth_state(state).await
+        }
+        async fn get_oauth_state(
+            &self,
+            state: &str,
+        ) -> StorageResult<Option<secreton_domain::OAuthState>> {
+            self.inner.get_oauth_state(state).await
+        }
+        async fn delete_expired_oauth_states(&self) -> StorageResult<u64> {
+            self.inner.delete_expired_oauth_states().await
+        }
+    }
+
+    #[tokio::test]
+    async fn an_attempt_that_lost_its_lease_cannot_overwrite_the_winner() {
+        // Regression (severe, cross-process): the write of the encrypted root key was a plain
+        // `store` authorised only by a preceding `lease.check()`. That check reads an
+        // in-process flag, so a holder whose lease had expired and been taken over could still
+        // write afterwards — and on Redis the write repointed the path mapping, so the winning
+        // attempt's returned shares no longer opened the root key the path resolved to. The
+        // fix makes the write itself conditional on the lease *in the shared backend*.
+        //
+        // The sequence is forced, not raced: A parks inside the root-key write having already
+        // passed its check; its lease is expired; B legitimately takes over and completes;
+        // only then is A resumed. A must fail, and B's state must be untouched.
+        let _env = crate::test_support::without_root_key();
+        let storage = Arc::new(LeaseTakeoverBackend::new(ROOT_KEY_PATH));
+        let storage_dyn: Arc<dyn StorageBackend + Send + Sync> = storage.clone();
+
+        let replica_a = Arc::new(sealed_vault_with_storage(storage_dyn.clone()).await);
+        let replica_b = Arc::new(sealed_vault_with_storage(storage_dyn.clone()).await);
+
+        // A runs until it is parked inside its root-key write.
+        let attempt_a = {
+            let replica_a = replica_a.clone();
+            tokio::spawn(async move {
+                replica_a
+                    .seal
+                    .init(3, 2, "stale-root", &replica_a.auth, &replica_a.mfa)
+                    .await
+            })
+        };
+        storage.reached.notified().await;
+
+        // B takes the expired lease over and initialises. Its shares are the ones that must
+        // open the final vault — asserted once, after A has resumed, because `unseal` is
+        // single-shot and consumes the shares buffer.
+        let winner = replica_b
+            .seal
+            .init(3, 2, "winner-root", &replica_b.auth, &replica_b.mfa)
+            .await
+            .expect("the second replica must be able to take over an expired lease");
+
+        // Capture B's durable state before A resumes, so the assertions name exactly what
+        // must not change.
+        let root_key_before = storage
+            .get_by_path(ROOT_KEY_PATH)
+            .await
+            .expect("storage")
+            .expect("the winner stored a root key");
+        let identity_before = storage
+            .get_by_path(ROOT_IDENTITY_PATH)
+            .await
+            .expect("storage")
+            .expect("the winner stored a root identity");
+
+        // Now let A continue. It must fail closed.
+        storage.resume.notify_one();
+        let lost = attempt_a
+            .await
+            .expect("the stale attempt task must not panic");
+        assert!(
+            lost.is_err(),
+            "an attempt that lost its lease must not succeed, even though it passed its own \
+             check before writing"
+        );
+
+        // A changed nothing of B's. This is the whole invariant: a losing attempt must not be
+        // able to alter the artifacts of the attempt that took over.
+        let root_key_after = storage
+            .get_by_path(ROOT_KEY_PATH)
+            .await
+            .expect("storage")
+            .expect("the winner's root key must still be present");
+        let identity_after = storage
+            .get_by_path(ROOT_IDENTITY_PATH)
+            .await
+            .expect("storage")
+            .expect("the winner's root identity must still be present");
+        assert_eq!(
+            root_key_after.id, root_key_before.id,
+            "a stale attempt must not replace the winner's root key"
+        );
+        assert_eq!(
+            root_key_after.encrypted_data, root_key_before.encrypted_data,
+            "a stale attempt must not overwrite the winner's encrypted root key"
+        );
+        assert_eq!(
+            identity_after.encrypted_data, identity_before.encrypted_data,
+            "a stale attempt must not overwrite the winner's root identity"
+        );
+
+        // The winner's shares still open the final root key. This is the property the finding
+        // says is violated, asserted directly rather than inferred from the records.
+        replica_b
+            .seal
+            .unseal(&winner.keys[0])
+            .await
+            .expect("share one after the stale attempt resumed");
+        let complete = replica_b
+            .seal
+            .unseal(&winner.keys[1])
+            .await
+            .expect("share two after the stale attempt resumed");
+        assert_eq!(
+            claims_of(&complete.root_token.expect("root credential"))["username"],
+            "winner-root",
+            "the winner's shares must still open the vault after the stale attempt resumed"
+        );
+
+        // No artifact of A's own attempt survived. The paths above are B's: `sys/init`,
+        // `sys/root_key_enc` and `sys/root_identity` are single-instance locations that the
+        // winner legitimately owns, and the TOTP record belongs to the winner's identity
+        // (asserted by the identity comparison above). What must be gone is anything named
+        // for A's attempt specifically — its account — and the marker itself.
+        assert!(
+            storage
+                .get_by_path(&format!(
+                    "{}{}",
+                    crate::services::auth::USER_STORAGE_PREFIX,
+                    "stale-root"
+                ))
+                .await
+                .expect("storage")
+                .is_none(),
+            "the stale attempt's account must not survive the winner's takeover"
+        );
+        assert!(
+            storage
+                .get_by_path(INIT_STAGING_PATH)
+                .await
+                .expect("storage")
+                .is_none(),
+            "the winner must not be left with a staging marker"
+        );
+
+        // A's shares cannot become shares for the final state: `init` failed, so it handed
+        // back no shares at all. The assertion below is the whole of that property — there is
+        // no share value to test against the winner's vault, because the fenced attempt
+        // produced none. (A version of this test that read shares out of a failed `init`
+        // would be asserting on a value the production type does not expose.)
+        assert!(
+            lost.as_ref().err().is_some(),
+            "an attempt that lost its lease must not return an initialization response"
         );
     }
 

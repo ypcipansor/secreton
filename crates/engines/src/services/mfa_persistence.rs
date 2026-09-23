@@ -4,7 +4,9 @@ use chrono::Utc;
 use rand::Rng;
 use secreton_auth::mfa::{TotpConfig, TotpEnrollment, TotpService, TotpValidationRequest};
 use secreton_domain::SecretonError;
-use secreton_storage::{EncryptionMetadata, SecretEntry, SecurityLevel, StorageBackend};
+use secreton_storage::{
+    EncryptionMetadata, SecretEntry, SecurityLevel, StorageBackend, StorageFence,
+};
 use std::collections::HashMap;
 use std::sync::Arc;
 use tokio::sync::Mutex;
@@ -93,7 +95,7 @@ impl TotpService for PersistentTotpService {
         entity_id: Uuid,
         account_name: String,
     ) -> Result<TotpEnrollment, SecretonError> {
-        self.enroll_owned(entity_id, account_name, None).await
+        self.enroll_owned(entity_id, account_name, None, None).await
     }
 
     /// Persist the enrollment with the attempt's owner token when one is supplied.
@@ -104,11 +106,18 @@ impl TotpService for PersistentTotpService {
     /// Initialization passes its lease token so a failed attempt's cleanup can remove the
     /// enrollment it created; on a shared backend that cleanup only deletes records whose
     /// token matches, so a token-less enrollment would be invisible to it.
+    ///
+    /// When `fence` is supplied the record is written through
+    /// [`StorageBackend::store_fenced`] rather than `store`, so the write itself only lands
+    /// while the named lease record still carries the token. That is the difference between
+    /// "removable afterwards" and "cannot be written at all once the lease is gone", and it
+    /// is what stops a stale attempt from leaving an orphaned second factor behind.
     async fn enroll_owned(
         &self,
         entity_id: Uuid,
         account_name: String,
         owner: Option<&str>,
+        fence: Option<StorageFence<'_>>,
     ) -> Result<TotpEnrollment, SecretonError> {
         let _user_lock = self.acquire_user_lock(entity_id).await;
         let _guard = _user_lock.lock().await;
@@ -162,12 +171,32 @@ impl TotpService for PersistentTotpService {
             entry = entry.owned_by(owner);
         }
 
-        self.storage
-            .store(&entry)
-            .await
-            .map_err(|e| SecretonError::Database {
-                message: format!("Failed to store enrollment: {}", e),
-            })?;
+        match fence {
+            Some(fence) => {
+                let written = self
+                    .storage
+                    .store_fenced(&entry, fence)
+                    .await
+                    .map_err(|e| SecretonError::Database {
+                        message: format!("Failed to store enrollment: {}", e),
+                    })?;
+                if !written {
+                    return Err(SecretonError::Database {
+                        message: "the initialization lease was lost before the TOTP \
+                                  enrollment could be written"
+                            .to_string(),
+                    });
+                }
+            }
+            None => {
+                self.storage
+                    .store(&entry)
+                    .await
+                    .map_err(|e| SecretonError::Database {
+                        message: format!("Failed to store enrollment: {}", e),
+                    })?;
+            }
+        }
 
         Ok(enrollment)
     }

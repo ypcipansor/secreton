@@ -10,8 +10,8 @@ use uuid::Uuid;
 use secreton_domain::OAuthState;
 
 use crate::{
-    HealthStatus, QueryParams, SecretEntry, StorageBackend, StorageError, StorageResult,
-    StorageStats, StorageTransaction,
+    HealthStatus, QueryParams, SecretEntry, StorageBackend, StorageError, StorageFence,
+    StorageResult, StorageStats, StorageTransaction,
 };
 
 /// In-memory storage backend.
@@ -160,6 +160,42 @@ impl StorageBackend for MemoryBackend {
         }
         let entry = data.remove(path).expect("just checked present");
         self.id_index.write().remove(&entry.id);
+        Ok(true)
+    }
+
+    /// Atomic within this backend's own lock, which is the whole guarantee a process-local
+    /// map can offer. The fence record and the write are evaluated under the same write
+    /// guard, so no task on this instance can observe the path between them and no caller
+    /// whose fence token no longer matches can publish anything.
+    async fn store_fenced(
+        &self,
+        entry: &SecretEntry,
+        fence: StorageFence<'_>,
+    ) -> StorageResult<bool> {
+        let mut data = self.data.write();
+        if !data
+            .get(fence.path)
+            .is_some_and(|e| e.has_owner(fence.token))
+        {
+            return Ok(false);
+        }
+
+        let existing = data.get(&entry.path).cloned();
+        let to_write = match existing {
+            Some(old) => {
+                let mut updated = entry.clone();
+                updated.id = old.id;
+                updated.created_at = old.created_at;
+                updated
+            }
+            None => entry.clone(),
+        };
+        let mut id_index = self.id_index.write();
+        if let Some(old) = data.get(&entry.path) {
+            id_index.remove(&old.id);
+        }
+        id_index.insert(to_write.id, to_write.path.clone());
+        data.insert(to_write.path.clone(), to_write);
         Ok(true)
     }
 

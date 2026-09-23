@@ -125,9 +125,9 @@ three:
 
 | Variable | Service | What it proves |
 |---|---|---|
-| `SECRETON_TEST_POSTGRES_URL` | PostgreSQL | Issued database credentials correspond to a real account; two replicas sharing one PostgreSQL admit exactly one `init` |
+| `SECRETON_TEST_POSTGRES_URL` | PostgreSQL | Issued database credentials correspond to a real account; two replicas sharing one PostgreSQL admit exactly one `init`; `store_fenced` refuses a lost lease and leaves the winner's record untouched |
 | `SECRETON_TEST_MYSQL_URL` | MySQL/MariaDB | The same for MySQL |
-| `SECRETON_TEST_REDIS_URL` | Redis | `delete_by_path` reports and performs the delete; `compare_and_set` arbitrates; two replicas sharing one Redis admit exactly one `init` |
+| `SECRETON_TEST_REDIS_URL` | Redis | `delete_by_path` reports and performs the delete; `compare_and_set` arbitrates; `store_fenced` refuses a stale attempt without repointing the path mapping; two replicas sharing one Redis admit exactly one `init` |
 
 The Redis tests exist because "path-keyed operations are a no-op" was true of that backend
 and could only be caught against the real server — a double cannot show whether the Lua

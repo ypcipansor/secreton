@@ -2,7 +2,7 @@
 
 use crate::{
     Coordination, HealthStatus, QueryParams, SecretEntry, StorageBackend, StorageError,
-    StorageResult, StorageStats, StorageTransaction,
+    StorageFence, StorageResult, StorageStats, StorageTransaction,
 };
 use async_trait::async_trait;
 use chrono::Utc;
@@ -533,6 +533,77 @@ impl StorageBackend for RedisBackend {
             })?;
 
         Ok(removed == 1)
+    }
+
+    /// Fenced write as a single server-side script.
+    ///
+    /// The fence record and the artifact are two different keys, and Redis runs a Lua
+    /// script as one atomic unit, so the `GET` of the fence and the two `SET`s of the write
+    /// are indivisible: no other client can take the lease over between them. That is what
+    /// the previous `store` could not do — it unconditionally repointed
+    /// `secreton:path:<artifact>` at the writer's own id, so a holder that had lost the
+    /// lease still overwrote the winning initialization's path mapping and made the
+    /// winner's returned shares stop opening the stored root key.
+    ///
+    /// `KEYS[1]`=fence path key, `KEYS[2]`=artifact path key.
+    /// `ARGV[1]`=fence token, `ARGV[2]`=artifact value, `ARGV[3]`=artifact write id.
+    async fn store_fenced(
+        &self,
+        entry: &SecretEntry,
+        fence: StorageFence<'_>,
+    ) -> StorageResult<bool> {
+        let value = serde_json::to_string(entry).map_err(|e| StorageError::SerializationError {
+            message: e.to_string(),
+        })?;
+
+        let fence_path_key = format!("secreton:path:{}", fence.path);
+        let artifact_path_key = format!("secreton:path:{}", entry.path);
+
+        let script = redis::Script::new(
+            r"
+            local fence_id = redis.call('GET', KEYS[1])
+            if not fence_id then
+                return 0
+            end
+            local fence = redis.call('GET', 'secreton:entry:' .. fence_id)
+            if not fence then
+                return 0
+            end
+            local ok, decoded = pcall(cjson.decode, fence)
+            if not ok or type(decoded) ~= 'table' or type(decoded.metadata) ~= 'table'
+                or decoded.metadata['storage_owner'] ~= ARGV[1] then
+                return 0
+            end
+
+            -- The value and the path mapping must name the same id, so the mapping never
+            -- resolves to a record whose own id disagrees. A key left by the id this
+            -- replaces is removed so the rewrite does not leak it.
+            local existing_id = redis.call('GET', KEYS[2])
+            if existing_id and existing_id ~= ARGV[3] then
+                redis.call('DEL', 'secreton:entry:' .. existing_id)
+            end
+            redis.call('SET', 'secreton:entry:' .. ARGV[3], ARGV[2])
+            redis.call('SET', KEYS[2], ARGV[3])
+            return 1
+            ",
+        );
+
+        let written: i64 = {
+            let mut conn = self.manager.lock().await;
+            script
+                .key(&fence_path_key)
+                .key(&artifact_path_key)
+                .arg(fence.token)
+                .arg(&value)
+                .arg(entry.id.to_string())
+                .invoke_async(&mut *conn)
+                .await
+                .map_err(|e| StorageError::QueryFailed {
+                    message: format!("Failed to fenced-store entry: {}", e),
+                })?
+        };
+
+        Ok(written == 1)
     }
 
     async fn begin_transaction(&self) -> StorageResult<Box<dyn StorageTransaction>> {

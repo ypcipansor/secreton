@@ -457,6 +457,41 @@ where
         Ok(deleted)
     }
 
+    /// Delegated to the inner backend, which owns the arbitration — a cache in front of a
+    /// store changes nothing about who fences.
+    ///
+    /// As with [`crate::StorageBackend::compare_and_set`], the cache is only touched once
+    /// the conditional write reports success, and the canonical record is re-read from the
+    /// backend rather than taken from the caller's input: a fenced write is a replacement, and
+    /// the backends preserve the existing `id` and `created_at`, so caching the input would
+    /// hand later reads a record whose identity disagrees with storage. A fence that did not
+    /// hold is a `Ok(false)` and must leave nothing behind that suggests a write happened.
+    async fn store_fenced(
+        &self,
+        entry: &SecretEntry,
+        fence: crate::StorageFence<'_>,
+    ) -> StorageResult<bool> {
+        let written = self.storage.store_fenced(entry, fence).await?;
+        if written {
+            let canonical = self.storage.get_by_path(&entry.path).await?;
+            match canonical {
+                Some(canonical) => self.cache_entry(&canonical).await,
+                None => {
+                    let _ = self
+                        .cache
+                        .delete(&Self::cache_key_for_path(&entry.path))
+                        .await;
+                }
+            }
+        } else {
+            let _ = self
+                .cache
+                .delete(&Self::cache_key_for_path(&entry.path))
+                .await;
+        }
+        Ok(written)
+    }
+
     // For operations that return multiple entries, we don't cache them as they can be large
     // and the cache keys would be complex to manage
     async fn list(&self, params: &crate::QueryParams) -> StorageResult<Vec<SecretEntry>> {
