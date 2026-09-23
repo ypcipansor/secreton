@@ -13,9 +13,32 @@ use std::sync::Arc;
 use tokio::sync::Mutex;
 use uuid::Uuid;
 
+/// How many times a conditional write re-reads and retries when the path's identity moved
+/// between its read and the atomic script. A benign single replacement is absorbed on the
+/// first retry; the bound turns a path under pathological churn into an error rather than a
+/// livelock.
+const CONDITIONAL_WRITE_MAX_ATTEMPTS: usize = 5;
+
+/// Build the record a replacement should write, preserving the identity and creation time
+/// the path already had — matching the memory, file and PostgreSQL backends, which all keep
+/// the existing `id` and `created_at` and overwrite the rest.
+fn plan_replacement(existing: &Option<SecretEntry>, entry: &SecretEntry) -> SecretEntry {
+    match existing {
+        Some(old) => {
+            let mut updated = entry.clone();
+            updated.id = old.id;
+            updated.created_at = old.created_at;
+            updated
+        }
+        None => entry.clone(),
+    }
+}
+
 /// Modern Redis storage backend with connection pooling
 pub struct RedisBackend {
     manager: Arc<Mutex<ConnectionManager>>,
+    #[cfg(test)]
+    pause: Option<Arc<crate::test_support::WritePause>>,
 }
 
 /// Redis transaction implementation using pipelines
@@ -149,7 +172,27 @@ impl RedisBackend {
 
         Ok(Self {
             manager: Arc::new(Mutex::new(manager)),
+            #[cfg(test)]
+            pause: None,
         })
+    }
+
+    /// Test-only: force this backend's conditional writes to park just before their script
+    /// the first time one runs, so a test can replace the path's record in the window
+    /// between the read and the write. Returns the rendezvous handle.
+    #[cfg(test)]
+    pub(crate) fn arm_compare_and_set_pause(&mut self) -> Arc<crate::test_support::WritePause> {
+        let pause = Arc::new(crate::test_support::WritePause::new());
+        self.pause = Some(pause.clone());
+        pause
+    }
+
+    /// Test-only: the pause for the first attempt, taken once.
+    #[cfg(test)]
+    async fn take_pause(&self) {
+        if let Some(pause) = &self.pause {
+            pause.park().await;
+        }
     }
 }
 
@@ -402,8 +445,21 @@ impl StorageBackend for RedisBackend {
     /// The record body is never re-encoded inside the script: Lua's `cjson` renders an
     /// empty table as `{}`, so a round-trip turns an empty `tags` array into a map and the
     /// entry stops deserialising. The caller hands over a fully-formed value and the script
-    /// only chooses to write it or not; id and creation time are preserved in Rust, where
-    /// serde handles the types, exactly as the memory and file backends do.
+    /// only chooses to write it or not.
+    ///
+    /// A replacement preserves the identity the path already had, and the *expected* id is
+    /// carried into the script as a second precondition: the script writes only while the
+    /// path mapping still names that id. The id is chosen in Rust from a read that happens
+    /// before the script runs, so without that check a path replaced in between would let
+    /// this call publish a record whose id was chosen from a stale read — resurrecting an
+    /// identity that is no longer current and deleting the live record under the current
+    /// id. When the mapping has moved, the script writes nothing and signals the caller
+    /// (return `2`), which re-reads and rebuilds so the payload always carries the identity
+    /// that is current at the instant of the write. This is why the pre-read is a *hint*
+    /// that the script verifies, not an authority it trusts.
+    ///
+    /// `outcome` is the script's return value: `1` written, `0` precondition failed, `2`
+    /// identity moved since the read.
     async fn compare_and_set(
         &self,
         entry: &SecretEntry,
@@ -411,63 +467,61 @@ impl StorageBackend for RedisBackend {
     ) -> StorageResult<bool> {
         let path_key = format!("secreton:path:{}", entry.path);
 
-        // Read the current record first (without holding the connection lock across the
-        // read) so a replacement keeps the identity and creation time the path already had.
-        let existing = self.get_by_path(&entry.path).await?;
-        let to_write = match &existing {
-            Some(old) => {
-                let mut updated = entry.clone();
-                updated.id = old.id;
-                updated.created_at = old.created_at;
-                updated
-            }
-            None => entry.clone(),
-        };
-
-        let value =
-            serde_json::to_string(&to_write).map_err(|e| StorageError::SerializationError {
-                message: e.to_string(),
-            })?;
-
         let expected_owner = match expect {
             crate::Expect::Owner(token) => Some(token.to_string()),
             _ => None,
         };
 
-        // KEYS[1]=path key; ARGV[1]=value, ARGV[2]=write id, ARGV[3]=mode
-        // ("absent" | "any" | "owner"), ARGV[4]=owner token (owner mode only).
+        // KEYS[1]=path key; ARGV[1]=value, ARGV[2]=mode ("absent" | "any" | "owner"),
+        // ARGV[3]=owner token (owner mode only), ARGV[4]=the id the payload was built with.
         let script = redis::Script::new(
             r"
-            local mode = ARGV[3]
-            local existing_id = redis.call('GET', KEYS[1])
+            local mode = ARGV[2]
+            local mapping = redis.call('GET', KEYS[1])
+            local expected = ARGV[4]
 
             if mode == 'absent' then
-                if existing_id then
+                if mapping then
                     return 0
                 end
-            elseif mode == 'owner' then
-                if not existing_id then
+                redis.call('SET', 'secreton:entry:' .. expected, ARGV[1])
+                redis.call('SET', KEYS[1], expected)
+                return 1
+            end
+
+            if not mapping then
+                if mode == 'owner' then
                     return 0
                 end
-                local current = redis.call('GET', 'secreton:entry:' .. existing_id)
+                redis.call('SET', 'secreton:entry:' .. expected, ARGV[1])
+                redis.call('SET', KEYS[1], expected)
+                return 1
+            end
+
+            -- The mapping names an id. If the payload was built for a different one, the
+            -- path has been replaced since the read: a live record under the mapped id must
+            -- not be overwritten with a stale identity. A *dangling* mapping (no record
+            -- under the mapped id) is not a live record and may be repaired in place.
+            if mapping ~= expected then
+                if redis.call('GET', 'secreton:entry:' .. mapping) then
+                    return 2
+                end
+            end
+
+            if mode == 'owner' then
+                local current = redis.call('GET', 'secreton:entry:' .. mapping)
                 if not current then
                     return 0
                 end
                 local ok, decoded = pcall(cjson.decode, current)
                 if not ok or type(decoded) ~= 'table' or type(decoded.metadata) ~= 'table'
-                    or decoded.metadata['storage_owner'] ~= ARGV[4] then
+                    or decoded.metadata['storage_owner'] ~= ARGV[3] then
                     return 0
                 end
             end
 
-            -- The value and the path mapping must name the same id, so the mapping never
-            -- resolves to a record whose own id disagrees. A key left by the id this
-            -- replaces is removed so the rewrite does not leak it.
-            if existing_id and existing_id ~= ARGV[2] then
-                redis.call('DEL', 'secreton:entry:' .. existing_id)
-            end
-            redis.call('SET', 'secreton:entry:' .. ARGV[2], ARGV[1])
-            redis.call('SET', KEYS[1], ARGV[2])
+            redis.call('SET', 'secreton:entry:' .. expected, ARGV[1])
+            redis.call('SET', KEYS[1], expected)
             return 1
             ",
         );
@@ -478,22 +532,55 @@ impl StorageBackend for RedisBackend {
             crate::Expect::Owner(_) => "owner",
         };
 
-        let written: i64 = {
-            let mut conn = self.manager.lock().await;
-            script
-                .key(&path_key)
-                .arg(&value)
-                .arg(to_write.id.to_string())
-                .arg(mode)
-                .arg(expected_owner.unwrap_or_default())
-                .invoke_async(&mut *conn)
-                .await
-                .map_err(|e| StorageError::QueryFailed {
-                    message: format!("Failed to compare-and-set entry: {}", e),
-                })?
-        };
+        for _ in 0..CONDITIONAL_WRITE_MAX_ATTEMPTS {
+            // The identity and creation time the path currently has are what the replacement
+            // must keep, exactly as the memory and file backends do.
+            let existing = self.get_by_path(&entry.path).await?;
+            let to_write = plan_replacement(&existing, entry);
 
-        Ok(written == 1)
+            let value =
+                serde_json::to_string(&to_write).map_err(|e| StorageError::SerializationError {
+                    message: e.to_string(),
+                })?;
+
+            // A test can park here to force a replacement into the read-to-script window.
+            #[cfg(test)]
+            self.take_pause().await;
+
+            let outcome: i64 = {
+                let mut conn = self.manager.lock().await;
+                script
+                    .key(&path_key)
+                    .arg(&value)
+                    .arg(mode)
+                    .arg(expected_owner.as_deref().unwrap_or_default())
+                    .arg(to_write.id.to_string())
+                    .invoke_async(&mut *conn)
+                    .await
+                    .map_err(|e| StorageError::QueryFailed {
+                        message: format!("Failed to compare-and-set entry: {}", e),
+                    })?
+            };
+
+            match outcome {
+                1 => return Ok(true),
+                0 => return Ok(false),
+                // The path's identity moved between the read and the script. Re-read and
+                // rebuild so the payload matches the record that is current at the write.
+                2 => continue,
+                other => {
+                    return Err(StorageError::QueryFailed {
+                        message: format!("compare-and-set returned an unexpected outcome: {other}"),
+                    });
+                }
+            }
+        }
+
+        Err(StorageError::QueryFailed {
+            message: "the record at this path is being replaced too rapidly to \
+                      conditionally write it"
+                .to_string(),
+        })
     }
 
     async fn delete_owned(&self, path: &str, token: &str) -> StorageResult<bool> {
@@ -706,5 +793,172 @@ impl StorageBackend for RedisBackend {
 
     async fn delete_expired_oauth_states(&self) -> StorageResult<u64> {
         Ok(0)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::{EncryptionMetadata, Expect, SecurityLevel, StorageBackend};
+
+    fn redis_url() -> Option<String> {
+        match std::env::var("SECRETON_TEST_REDIS_URL") {
+            Ok(url) if !url.trim().is_empty() => Some(url),
+            _ => {
+                eprintln!("skipping: SECRETON_TEST_REDIS_URL is not set");
+                None
+            }
+        }
+    }
+
+    fn entry_at(path: &str, payload: &[u8]) -> SecretEntry {
+        SecretEntry::new(
+            path.to_string(),
+            payload.to_vec(),
+            EncryptionMetadata::default(),
+            SecurityLevel::Internal,
+            Uuid::nil(),
+        )
+    }
+
+    /// Regression (severe): the conditional write chose the replacement's `id` from a read
+    /// that happened *before* the atomic script, and the script trusted it — including a
+    /// `DEL` of whatever id the path happened to name at script time. A path replaced in
+    /// that window had its live record deleted and its identity overwritten by one taken
+    /// from a stale read, so `get_by_path` resolved to a record other writers had already
+    /// moved past.
+    ///
+    /// The interleaving is *forced*, not raced: the first conditional write is parked by
+    /// `arm_compare_and_set_pause` after its read and before its script, a second backend
+    /// replaces the path while it is parked, and only then is it released. The write must
+    /// not publish its stale identity, must not delete the replacement's record, and must
+    /// leave the key, the body id and the path mapping naming one consistent record.
+    #[tokio::test]
+    async fn a_replacement_racing_the_read_cannot_publish_a_stale_identity() {
+        let Some(url) = redis_url() else {
+            return;
+        };
+        let namespace = format!("it/{}", Uuid::new_v4());
+        let path = format!("{namespace}/contract/raced");
+
+        // The seed establishes the identity the racing write will read first.
+        let mut writer_backend = RedisBackend::new(&url).await.expect("connect");
+        let pause = writer_backend.arm_compare_and_set_pause();
+        let writer_backend = Arc::new(writer_backend);
+
+        let seeded = entry_at(&path, b"seeded");
+        let seeded_id = seeded.id;
+        writer_backend.store(&seeded).await.expect("seed");
+
+        // Begin the conditional write and wait until it has read the seeded record and
+        // parked, so the replacement below lands strictly inside the read-to-script window.
+        let writer = {
+            let backend = writer_backend.clone();
+            let path = path.clone();
+            tokio::spawn(async move {
+                backend
+                    .compare_and_set(&entry_at(&path, b"raced-payload"), Expect::Any)
+                    .await
+            })
+        };
+        pause.wait_reached().await;
+
+        // A separate backend replaces the path with a new identity while the first write is
+        // parked. This is the concurrent replacement the stale read must not clobber.
+        let other = RedisBackend::new(&url).await.expect("connect");
+        let winner = entry_at(&path, b"winner");
+        let winner_id = winner.id;
+        assert_ne!(
+            winner_id, seeded_id,
+            "the replacement must be a distinct record, or this proves nothing"
+        );
+        other.store(&winner).await.expect("concurrent replacement");
+
+        // Release the parked write. It must detect that the path moved, re-read and rebuild,
+        // so the record it publishes carries the *current* identity — never the stale one.
+        pause.release();
+        let outcome = writer.await.expect("task must not panic");
+        assert!(
+            outcome.expect("conditional write must succeed"),
+            "an unconditional replacement must eventually succeed, retrying past the race"
+        );
+
+        // The live record must not have been deleted by the racing write.
+        let winner_record = writer_backend
+            .get_by_id(winner_id)
+            .await
+            .expect("read winner by id");
+        assert!(
+            winner_record.is_some(),
+            "the path's live record must not be deleted by a write that read it stalely"
+        );
+
+        // The path must resolve to the current identity, not the one read before the race.
+        let resolved = writer_backend
+            .get_by_path(&path)
+            .await
+            .expect("read by path")
+            .expect("the path must still resolve");
+        assert_ne!(
+            resolved.id, seeded_id,
+            "the write must not republish the identity it read before the path moved"
+        );
+        assert_eq!(
+            resolved.id, winner_id,
+            "the replacement must keep the identity the path had at write time"
+        );
+
+        // No key/body id mismatch: the entry key, the body's own id and the path mapping
+        // must all name the same record.
+        let entry_key = format!("secreton:entry:{}", resolved.id);
+        let body: SecretEntry = {
+            let mut conn = writer_backend.manager.lock().await;
+            let raw: String = conn.get(&entry_key).await.expect("raw entry body");
+            serde_json::from_str(&raw).expect("entry body must deserialise")
+        };
+        assert_eq!(
+            body.id, resolved.id,
+            "the body's id must equal the id its key and the path mapping name"
+        );
+        let mapped: String = {
+            let mut conn = writer_backend.manager.lock().await;
+            conn.get(format!("secreton:path:{}", path))
+                .await
+                .expect("path mapping")
+        };
+        assert_eq!(
+            mapped,
+            resolved.id.to_string(),
+            "the path mapping must name the record it resolves to"
+        );
+
+        // `get_by_path` and `get_by_id` must name the same record.
+        let by_id = writer_backend
+            .get_by_id(resolved.id)
+            .await
+            .expect("read by id")
+            .expect("the resolved id must exist");
+        assert_eq!(
+            by_id.id, resolved.id,
+            "get_by_path and get_by_id must agree on the record"
+        );
+
+        // A following delete must remain correct: it removes this record and leaves no
+        // mapping behind that resolves to nothing (no orphan).
+        assert!(
+            writer_backend
+                .delete_by_id(resolved.id)
+                .await
+                .expect("delete resolved id"),
+            "the resolved record must be deletable"
+        );
+        assert!(
+            writer_backend
+                .get_by_path(&path)
+                .await
+                .expect("read after delete")
+                .is_none(),
+            "deleting the record must not leave a mapping that resolves to nothing"
+        );
     }
 }

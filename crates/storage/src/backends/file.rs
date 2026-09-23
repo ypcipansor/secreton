@@ -19,6 +19,10 @@ use uuid::Uuid;
 #[derive(Debug)]
 pub struct FileBackend {
     storage_path: PathBuf,
+    /// Test-only: a park point inside the conditional write, so a test can force a
+    /// concurrent replacement into the read-to-write window.
+    #[cfg(test)]
+    pause: Option<std::sync::Arc<crate::test_support::WritePause>>,
 }
 
 /// RAII guard for the file backend's cross-process advisory lock; released on drop.
@@ -65,7 +69,30 @@ impl FileBackend {
         })?;
         let _ = fs::remove_file(&test_file);
 
-        Ok(Self { storage_path: path })
+        Ok(Self {
+            storage_path: path,
+            #[cfg(test)]
+            pause: None,
+        })
+    }
+
+    /// Test-only: force this backend's conditional writes to park just before they publish,
+    /// so a test can replace the path's record in the window between the read and the write.
+    #[cfg(test)]
+    pub(crate) fn arm_compare_and_set_pause(
+        &mut self,
+    ) -> std::sync::Arc<crate::test_support::WritePause> {
+        let pause = std::sync::Arc::new(crate::test_support::WritePause::new());
+        self.pause = Some(pause.clone());
+        pause
+    }
+
+    /// Test-only: the pause for the first attempt, taken once.
+    #[cfg(test)]
+    async fn take_pause(&self) {
+        if let Some(pause) = &self.pause {
+            pause.park().await;
+        }
     }
 
     /// Generate file path for a secreton entry by ID
@@ -98,32 +125,120 @@ impl FileBackend {
         })
     }
 
-    /// Write an entry through a temporary file and a rename, so a reader never observes a
-    /// half-written record.
+    /// Write an entry through a unique temporary file and a rename, so a reader never
+    /// observes a half-written record and two concurrent writers never collide.
     ///
     /// A plain `fs::write` truncates the destination before writing; a crash or a
     /// concurrent scanner in that window sees an empty or partial file. `rename` within a
     /// directory is atomic, which is the property [`StorageBackend::compare_and_set`]
     /// needs to be a real compare-and-set rather than a compare-and-maybe-write.
-    fn write_entry_atomically(&self, file_path: &Path, entry: &SecretEntry) -> StorageResult<()> {
+    ///
+    /// The temporary file is unique per call (`create_new`, so the kernel refuses a name
+    /// that already exists) rather than derived only from the destination. `store` and
+    /// `update` are not serialised by the advisory lock — a conditional write is, but a
+    /// plain write is deliberately last-writer-wins — so two concurrent writes to the same
+    /// id with a destination-derived temporary name would otherwise write the *same*
+    /// temporary file and one would rename the other's bytes into place, or fail because
+    /// the file had already been moved. A unique name makes each write's temporary file
+    /// private to it, and the atomic rename publishes whichever finishes last. This is
+    /// last-writer semantics, the same as the memory backend's plain `store`; it is not
+    /// serialisation, which only `compare_and_set`/`store_fenced` (under the lock) claim.
+    async fn write_entry_atomically(
+        &self,
+        file_path: &Path,
+        entry: &SecretEntry,
+    ) -> StorageResult<()> {
+        let tmp = self.stage_entry(file_path, entry)?;
+
+        // A test can park here — after its own temporary file exists, before the rename —
+        // so a concurrent writer is forced into the window rather than hoped into it.
+        #[cfg(test)]
+        self.take_pause().await;
+
+        self.publish_staged_entry(&tmp, file_path)
+    }
+
+    /// Serialize `entry` into a fresh, uniquely-named temporary file beside `file_path` and
+    /// return its path. The temporary file is private to this call; a failure removes it.
+    fn stage_entry(&self, file_path: &Path, entry: &SecretEntry) -> StorageResult<PathBuf> {
         let content =
             serde_json::to_string_pretty(entry).map_err(|e| StorageError::SerializationError {
                 message: format!("Failed to serialize entry: {}", e),
             })?;
 
-        let tmp = file_path.with_extension("json.tmp");
-        fs::write(&tmp, content).map_err(|e| StorageError::BackendError {
-            backend: "File".to_string(),
-            message: format!("Failed to write entry file {}: {}", tmp.display(), e),
-        })?;
-        fs::rename(&tmp, file_path).map_err(|e| StorageError::BackendError {
-            backend: "File".to_string(),
-            message: format!(
-                "Failed to publish entry file {}: {}",
-                file_path.display(),
-                e
-            ),
-        })
+        let mut tmp = self.temporary_path(file_path);
+        let mut file = loop {
+            match fs::OpenOptions::new()
+                .write(true)
+                .create_new(true)
+                .open(&tmp)
+            {
+                Ok(file) => break file,
+                Err(e) if e.kind() == std::io::ErrorKind::AlreadyExists => {
+                    // Overwhelmingly unlikely (a v4 UUID), but retry rather than reuse a
+                    // name another writer owns.
+                    tmp = self.temporary_path(file_path);
+                }
+                Err(e) => {
+                    return Err(StorageError::BackendError {
+                        backend: "File".to_string(),
+                        message: format!(
+                            "Failed to create temporary file {}: {}",
+                            tmp.display(),
+                            e
+                        ),
+                    });
+                }
+            }
+        };
+
+        if let Err(e) = std::io::Write::write_all(&mut file, content.as_bytes()) {
+            drop(file);
+            let _ = fs::remove_file(&tmp);
+            return Err(StorageError::BackendError {
+                backend: "File".to_string(),
+                message: format!("Failed to write temporary file {}: {}", tmp.display(), e),
+            });
+        }
+        drop(file);
+        Ok(tmp)
+    }
+
+    /// Atomically publish a staged temporary file over `file_path`. On failure the staged
+    /// file is removed, so a failed write leaves no debris and — because the name is unique
+    /// to the staging call — never removes another writer's temporary file.
+    fn publish_staged_entry(&self, tmp: &Path, file_path: &Path) -> StorageResult<()> {
+        if let Err(e) = fs::rename(tmp, file_path) {
+            let _ = fs::remove_file(tmp);
+            return Err(StorageError::BackendError {
+                backend: "File".to_string(),
+                message: format!(
+                    "Failed to publish entry file {}: {}",
+                    file_path.display(),
+                    e
+                ),
+            });
+        }
+        Ok(())
+    }
+
+    /// A temporary path in the destination's directory, unique to this call.
+    ///
+    /// The `rename` must stay within one directory to be atomic, so the temporary file is a
+    /// sibling of the destination. The name carries the destination's file name, a v4 UUID
+    /// and this process's id, so it is unique across writers and processes; the extension is
+    /// deliberately not `.json`, so a concurrent [`Self::scan_entries`] does not try to read
+    /// a half-written temporary file as an entry.
+    fn temporary_path(&self, file_path: &Path) -> PathBuf {
+        let stem = file_path
+            .file_name()
+            .and_then(|n| n.to_str())
+            .unwrap_or("entry");
+        file_path.with_file_name(format!(
+            ".{stem}.{}-{}.tmp",
+            Uuid::new_v4(),
+            std::process::id()
+        ))
     }
 
     /// Path of the advisory lock that serialises this backend's conditional operations
@@ -267,7 +382,7 @@ impl FileBackend {
 impl StorageBackend for FileBackend {
     async fn store(&self, entry: &SecretEntry) -> StorageResult<()> {
         let file_path = self.entry_path(entry.id);
-        self.write_entry_atomically(&file_path, entry)
+        self.write_entry_atomically(&file_path, entry).await
     }
 
     async fn get_by_id(&self, id: Uuid) -> StorageResult<Option<SecretEntry>> {
@@ -373,7 +488,8 @@ impl StorageBackend for FileBackend {
             }
             None => entry.clone(),
         };
-        self.write_entry_atomically(&self.entry_path(to_write.id), &to_write)?;
+        self.write_entry_atomically(&self.entry_path(to_write.id), &to_write)
+            .await?;
         Ok(true)
     }
 
@@ -424,7 +540,8 @@ impl StorageBackend for FileBackend {
             }
             None => entry.clone(),
         };
-        self.write_entry_atomically(&self.entry_path(to_write.id), &to_write)?;
+        self.write_entry_atomically(&self.entry_path(to_write.id), &to_write)
+            .await?;
         Ok(true)
     }
 
@@ -578,5 +695,101 @@ impl StorageBackend for FileBackend {
 
     async fn delete_expired_oauth_states(&self) -> StorageResult<u64> {
         Ok(0)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::{EncryptionMetadata, SecurityLevel, StorageBackend};
+    use std::sync::Arc;
+
+    fn entry_at(id: Uuid, path: &str, payload: &[u8]) -> SecretEntry {
+        let mut entry = SecretEntry::new(
+            path.to_string(),
+            payload.to_vec(),
+            EncryptionMetadata::default(),
+            SecurityLevel::Internal,
+            Uuid::nil(),
+        );
+        // The destination is chosen by id, so pin it; `SecretEntry::new`'s last argument is
+        // the owner, not the id.
+        entry.id = id;
+        entry
+    }
+
+    /// Regression: the write staged into a temporary file named only after the destination
+    /// (`<id>.json.tmp`), so two concurrent writes to the same destination used the *same*
+    /// temporary path. One would rename the other's bytes into place, or the second rename
+    /// would fail because the first had already moved the file away — either way a write
+    /// either lost its own payload or failed.
+    ///
+    /// The interleaving is forced: the first write is parked after it has staged its
+    /// temporary file and before the rename, the second write runs to completion in that
+    /// window, and only then is the first released. Each write must publish its own payload
+    /// with the atomic rename, and the second must not be able to observe or destroy the
+    /// first's temporary file. The property is that a completed write's payload is readable
+    /// and the destination always names one of the two written payloads, never a mixture.
+    #[tokio::test]
+    async fn concurrent_writes_to_one_destination_use_private_temporary_files() {
+        let dir = tempfile::tempdir().expect("temp dir");
+        let id = Uuid::new_v4();
+        let path = "contract/one-destination";
+
+        let mut first = FileBackend::new(dir.path().to_str().expect("utf8 path")).expect("backend");
+        let pause = first.arm_compare_and_set_pause();
+        let first = Arc::new(first);
+
+        let first_entry = entry_at(id, path, b"first-payload");
+        let first_write = {
+            let backend = first.clone();
+            let entry = first_entry.clone();
+            tokio::spawn(async move { backend.store(&entry).await })
+        };
+        pause.wait_reached().await;
+
+        // The second write completes entirely inside the first write's staging-to-rename
+        // window, using the same destination id.
+        let second = FileBackend::new(dir.path().to_str().expect("utf8 path")).expect("backend");
+        let second_entry = entry_at(id, path, b"second-payload");
+        second
+            .store(&second_entry)
+            .await
+            .expect("the second concurrent write must succeed");
+
+        // Releasing the first must not fail: its temporary file is its own, so the second
+        // write could neither move nor remove it.
+        pause.release();
+        first_write
+            .await
+            .expect("task must not panic")
+            .expect("the first concurrent write must succeed");
+
+        // Exactly one record exists for the id, and it is one of the two payloads — not a
+        // truncation, not a mixture, and not a failure caused by a shared temporary path.
+        let resolved = first
+            .get_by_id(id)
+            .await
+            .expect("read by id")
+            .expect("the destination must exist");
+        assert!(
+            resolved.encrypted_data == b"first-payload"
+                || resolved.encrypted_data == b"second-payload",
+            "the destination must hold one writer's payload intact, got {:?}",
+            String::from_utf8_lossy(&resolved.encrypted_data)
+        );
+
+        // No temporary file survives: each write either renamed its own or would have
+        // removed it on failure, and neither could have leaked the other's.
+        let leftovers = fs::read_dir(dir.path())
+            .expect("read dir")
+            .filter_map(|e| e.ok())
+            .map(|e| e.file_name().to_string_lossy().into_owned())
+            .filter(|name| name.ends_with(".tmp"))
+            .collect::<Vec<_>>();
+        assert!(
+            leftovers.is_empty(),
+            "no temporary file may survive a completed write: {leftovers:?}"
+        );
     }
 }

@@ -107,6 +107,20 @@ and ~59k, and from not compiling at all to a green build with a full test suite.
   backend under an OS advisory lock. A backend that cannot enforce a fence returns
   `StorageError::Unsupported` and `init` treats that as a hard failure rather than falling
   back to an unconditional write.
+- **A conditional write could publish an identity taken from a stale read.** The Redis
+  backend chose the record's `id` from a read that happened before its atomic script, and
+  the script trusted it — including deleting whatever id the path happened to name at
+  script time. A path replaced in that window had its live record deleted and its identity
+  overwritten by one no longer current, so concurrent writers disagreed about the record a
+  path resolved to. The script now carries the expected id as a second precondition, writes
+  only while the mapping still names it, and signals the caller when it has moved so the
+  payload is rebuilt from the identity that is current at the instant of the write.
+- **Two concurrent file writes to one destination could collide on a temporary file.** The
+  temporary file was named only after the destination (`<id>.json.tmp`), so two writers
+  staging the same id shared one path: one renamed the other's bytes into place, or the
+  publish failed because the file had already been moved away. Each write stages into its
+  own uniquely named temporary file (`create_new`, so the kernel refuses a name that is
+  taken) and publishes it with the atomic rename.
 
 ### Removed
 

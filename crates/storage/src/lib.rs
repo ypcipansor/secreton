@@ -14,6 +14,8 @@ pub mod backends;
 pub mod cache;
 pub mod factory;
 pub mod models;
+#[cfg(test)]
+pub(crate) mod test_support;
 
 #[cfg(feature = "postgres")]
 pub use backends::PostgresBackend;
