@@ -85,8 +85,10 @@ jobs:
       - name: Build server + wasm bundle
         run: cargo leptos build --release
 
-      # `cargo leptos serve` rebuilds in release and serves on :3000. It is a long-running
-      # process, so it runs detached with its output in a file the failure path can print.
+      # `cargo leptos serve --release` reuses the release bundle built above and serves on
+      # :3000. Without `--release` it rebuilds the whole workspace in the debug profile,
+      # which is what overran the readiness wait. It is long-running, so it runs detached
+      # with its output in a file the failure path can print.
       - name: Start the server
         env:
           # A per-run secret, never committed and never printed. The server refuses to
@@ -95,7 +97,7 @@ jobs:
           SECRETON__AUTH__JWT__SECRET: ${{ github.token }}${{ github.run_id }}${{ github.run_attempt }}secreton-ci-jwt-secret
         run: |
           set -euo pipefail
-          nohup cargo leptos serve > /tmp/secreton-serve.log 2>&1 &
+          nohup cargo leptos serve --release > /tmp/secreton-serve.log 2>&1 &
           echo "$!" > /tmp/secreton-serve.pid
 
       - name: Wait for /health and /login
