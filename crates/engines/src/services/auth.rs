@@ -1751,6 +1751,27 @@ impl AuthenticationService {
         roles: Vec<String>,
         permissions: Vec<String>,
     ) -> Result<User, AuthError> {
+        self.register_bootstrap_root_owned(username, email, roles, permissions, None)
+            .await
+    }
+
+    /// [`Self::register_bootstrap_root`], stamping the persisted account with an owner
+    /// token.
+    ///
+    /// Initialization passes its cross-process lease token here so a failed attempt's
+    /// cleanup can remove the account it created: on a shared backend the cleanup deletes
+    /// with `delete_owned`, which only removes records carrying that token. An account
+    /// written without one is invisible to that path, so the rollback would leave a
+    /// privileged account behind while reporting success. Callers outside initialization
+    /// pass `None`, the same way the ordinary MFA setup path leaves an enrollment unowned.
+    pub async fn register_bootstrap_root_owned(
+        &self,
+        username: &str,
+        email: Option<String>,
+        roles: Vec<String>,
+        permissions: Vec<String>,
+        owner: Option<&str>,
+    ) -> Result<User, AuthError> {
         let path = format!("{}{}", USER_STORAGE_PREFIX, username);
         if self.storage.exists(&path).await? {
             return Err(AuthError::UserAlreadyExists);
@@ -1808,6 +1829,10 @@ impl AuthenticationService {
             SecurityLevel::Secret,
             Uuid::parse_str(&user.id).unwrap_or_default(),
         );
+        let entry = match owner {
+            Some(owner) => entry.owned_by(owner),
+            None => entry,
+        };
         self.storage.store(&entry).await?;
 
         Ok(user)

@@ -405,6 +405,15 @@ where
     /// The cache is updated only after the conditional write reports success, and a
     /// precondition that did not hold is reported as `Ok(false)` without touching it: a
     /// lost race must not leave a cached copy of a write that never happened.
+    ///
+    /// On success the record is *re-read* from the backend and that canonical record is
+    /// cached, never the caller's input. A compare-and-set is a replacement of a record
+    /// that already exists at the path, and the backends normalize what they write: the
+    /// existing `id` and `created_at` are preserved (see `Expect` and each backend's
+    /// `compare_and_set`). Caching the input would therefore hand a later read a record
+    /// whose identity and creation time differ from what storage holds — a divergence that
+    /// lasts until the entry expires from the cache. Re-reading costs one backend read per
+    /// successful conditional write and cannot drift.
     async fn compare_and_set(
         &self,
         entry: &SecretEntry,
@@ -412,7 +421,19 @@ where
     ) -> StorageResult<bool> {
         let written = self.storage.compare_and_set(entry, expect).await?;
         if written {
-            self.cache_entry(entry).await;
+            // Read back the canonical record. If the read fails or the record is
+            // unexpectedly absent, do not cache the input: a stale or wrong cached identity
+            // is worse than a cache miss, which the next read repairs.
+            let canonical = self.storage.get_by_path(&entry.path).await?;
+            match canonical {
+                Some(canonical) => self.cache_entry(&canonical).await,
+                None => {
+                    let _ = self
+                        .cache
+                        .delete(&Self::cache_key_for_path(&entry.path))
+                        .await;
+                }
+            }
         } else {
             // The inner write did not happen, but a stale positive cache entry for this
             // path would make a subsequent read report a record the backend may not have.
@@ -641,5 +662,87 @@ mod round_trip_tests {
             postcard::from_bytes::<SecretEntry>(b"not an entry at all").is_err(),
             "arbitrary bytes decoded as an entry"
         );
+    }
+
+    #[tokio::test]
+    async fn a_cached_read_after_a_compare_and_set_matches_the_backend() {
+        // Regression: after a successful compare-and-set the cache stored the *caller's*
+        // input. A conditional write replaces an existing record, and the backends normalize
+        // the replacement by keeping the existing `id` and `created_at`, so the cached copy
+        // diverged from storage — a later cached read reported an identity and creation time
+        // the backend never held, until the entry expired from the cache. The fix reads the
+        // canonical record back and caches that.
+        //
+        // The property: a cached read after a conditional write returns exactly what a direct
+        // backend read returns.
+        let backend = crate::backends::MemoryBackend::new();
+        let cached = CachedStorage::new(
+            backend.clone(),
+            InMemoryCache::new(),
+            Duration::from_secs(300),
+        );
+        let path = "kv/cas/target";
+
+        // Seed, then warm the cache so the conditional write is exercised against a cached
+        // record rather than a cold path.
+        let seeded = sample_entry_with_path(path, b"v1");
+        crate::StorageBackend::store(&cached, &seeded)
+            .await
+            .expect("seed");
+        let _ = crate::StorageBackend::get_by_path(&cached, path)
+            .await
+            .expect("warm the cache");
+
+        // A replacement carries a fresh id and creation time. The backend discards both and
+        // keeps the seeded record's; the cache must reflect that, not the input.
+        let mut replacement = sample_entry_with_path(path, b"v2");
+        assert_ne!(
+            replacement.id, seeded.id,
+            "the input must differ from the stored record, or this proves nothing"
+        );
+        replacement.created_at = seeded.created_at + chrono::Duration::hours(1);
+
+        let wrote =
+            crate::StorageBackend::compare_and_set(&cached, &replacement, crate::Expect::Any)
+                .await
+                .expect("conditional write");
+        assert!(
+            wrote,
+            "the unconditional precondition must let the write through"
+        );
+
+        let cached_read = crate::StorageBackend::get_by_path(&cached, path)
+            .await
+            .expect("cached read")
+            .expect("present");
+        let direct_read = crate::StorageBackend::get_by_path(&backend, path)
+            .await
+            .expect("direct read")
+            .expect("present");
+
+        assert_eq!(
+            cached_read.id, direct_read.id,
+            "the cached record's id must match storage after a conditional write"
+        );
+        assert_eq!(
+            cached_read.created_at, direct_read.created_at,
+            "the cached record's creation time must match storage"
+        );
+        assert_eq!(
+            cached_read.id, seeded.id,
+            "the normalized replacement must keep the seeded record's id"
+        );
+        assert_eq!(cached_read.encrypted_data, direct_read.encrypted_data);
+        assert_eq!(cached_read.encrypted_data, b"v2");
+    }
+
+    fn sample_entry_with_path(path: &str, payload: &[u8]) -> SecretEntry {
+        SecretEntry::new(
+            path.to_string(),
+            payload.to_vec(),
+            EncryptionMetadata::default(),
+            SecurityLevel::Secret,
+            uuid::Uuid::new_v4(),
+        )
     }
 }

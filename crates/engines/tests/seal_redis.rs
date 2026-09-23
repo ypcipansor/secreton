@@ -237,6 +237,92 @@ async fn redis_delete_by_path_reports_and_removes() {
     );
 }
 
+/// Regression (severe): `delete_by_id` read the entry, deleted the entry key, then removed
+/// `secreton:path:<entry.path>` unconditionally. If the path had been rewritten in between —
+/// a concurrent `store` publishing a replacement under the same path — that second delete
+/// removed the *replacement's* mapping. Its entry key survived but was unreachable by path,
+/// so the replacement was lost while `get_by_path` reported a missing record.
+///
+/// The fixed property: deleting an old id removes its own record, and a replacement written
+/// under the same path before the delete still resolves by path afterwards. The old
+/// read-then-delete is falsified here because this test forces exactly that interleaving on
+/// a real server.
+#[tokio::test]
+async fn redis_delete_by_id_does_not_unlink_a_concurrent_replacement() {
+    let Some(url) = redis_url() else {
+        return;
+    };
+    let backend = RedisBackend::new(&url).await.expect("connect");
+    let storage: Arc<NamespacedRedis> = Arc::new(NamespacedRedis {
+        inner: backend,
+        prefix: format!("it/{}", uuid::Uuid::new_v4()),
+    });
+
+    let path = "contract/replaced";
+    let original = SecretEntry::new(
+        path.to_string(),
+        b"original".to_vec(),
+        secreton_storage::EncryptionMetadata::default(),
+        SecurityLevel::Internal,
+        uuid::Uuid::nil(),
+    );
+    storage.store(&original).await.expect("store original");
+
+    // Read the original so its id is known, then rewrite the same path as a *replacement*
+    // with a different id — the state a concurrent `store` would leave behind.
+    let read_back = storage
+        .get_by_path(path)
+        .await
+        .expect("read")
+        .expect("original is present");
+    assert_eq!(read_back.id, original.id);
+
+    let replacement = SecretEntry::new(
+        path.to_string(),
+        b"replacement".to_vec(),
+        secreton_storage::EncryptionMetadata::default(),
+        SecurityLevel::Internal,
+        uuid::Uuid::nil(),
+    );
+    assert_ne!(
+        replacement.id, original.id,
+        "the replacement must be a distinct record, or this proves nothing"
+    );
+    storage
+        .store(&replacement)
+        .await
+        .expect("store replacement");
+
+    // Delete the *old* id. Its path mapping no longer points at it, so the replacement's
+    // mapping must survive.
+    assert!(
+        storage
+            .delete_by_id(original.id)
+            .await
+            .expect("delete old id"),
+        "deleting the old id that still has its entry must report true"
+    );
+    assert!(
+        storage
+            .get_by_id(original.id)
+            .await
+            .expect("read old id")
+            .is_none(),
+        "the deleted entry must be gone by id"
+    );
+
+    let resolved = storage
+        .get_by_path(path)
+        .await
+        .expect("read replacement by path")
+        .expect("the concurrent replacement must still be reachable by path");
+    assert_eq!(
+        resolved.id, replacement.id,
+        "the path must resolve to the replacement, not the deleted record"
+    );
+    assert_eq!(resolved.encrypted_data, b"replacement");
+}
+
 /// `compare_and_set` on Redis is one server-side Lua invocation, so an insert-if-absent
 /// admits one writer and the owner-conditional write is refused after a takeover.
 #[tokio::test]

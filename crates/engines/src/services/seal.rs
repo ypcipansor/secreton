@@ -58,6 +58,12 @@ pub struct SealService {
     // without weakening a real code path.
     #[cfg(test)]
     fail_next_bootstrap: Arc<AtomicBool>,
+
+    // Test-only override of [`INIT_LEASE_TTL_SECS`], so a test can exercise the lease
+    // expiry and renewal path in milliseconds rather than the five minutes production
+    // uses. `None` means the production constant.
+    #[cfg(test)]
+    lease_ttl_secs: Option<u64>,
 }
 
 #[derive(Debug, Serialize, Deserialize)]
@@ -108,7 +114,16 @@ const INIT_LEASE_PATH: &str = "sys/init_lease";
 ///
 /// Generous enough for a slow Shamir split and TOTP enrollment on a loaded machine, short
 /// enough that a replica that died mid-initialization does not block recovery indefinitely.
+/// A *live* attempt never relies on this window: it renews the lease while it runs (see
+/// [`InitLeaseGuard`]), so the expiry only ever lets a genuinely dead holder be replaced.
 const INIT_LEASE_TTL_SECS: u64 = 300;
+
+/// Divisor applied to the TTL to get the renewal interval.
+///
+/// The holder renews every `ttl / this`, so a single missed renewal does not yet let the
+/// lease expire — there are two more opportunities before the deadline — while a holder
+/// whose renewal path is genuinely broken is fenced well before a replacement can take over.
+const INIT_LEASE_RENEW_DIVISOR: u64 = 3;
 
 /// What an attempt records at [`INIT_LEASE_PATH`].
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -122,6 +137,74 @@ struct InitLease {
 impl InitLease {
     fn is_expired(&self, now: i64) -> bool {
         self.expires_at <= now
+    }
+}
+
+/// Build the lease record for `owner`, expiring `ttl_secs` from now.
+///
+/// A free function so the acquisition path and the renewal task write byte-identical
+/// records; the record is an ordinary [`SecretEntry`] carrying the owner token in its
+/// metadata, which is what the ownership-conditional replace matches on.
+fn lease_entry(owner: &str, ttl_secs: u64) -> SecretEntry {
+    SecretEntry::new(
+        INIT_LEASE_PATH.to_string(),
+        serde_json::to_vec(&InitLease {
+            owner: owner.to_string(),
+            expires_at: Utc::now().timestamp() + ttl_secs as i64,
+        })
+        .unwrap_or_default(),
+        EncryptionMetadata::default(),
+        SecurityLevel::Internal,
+        Uuid::nil(),
+    )
+    .owned_by(owner)
+}
+
+/// A held initialization lease: the owner token, the fence every durable write consults,
+/// and — on a backend that arbitrates between processes — the task that renews it.
+///
+/// A fixed expiry alone is not enough. If an attempt runs longer than its TTL, a second
+/// replica may legitimately take the lease over while the first is still writing; the first
+/// then keeps overwriting the second's artifacts and can hand its caller shares that do not
+/// open the root key that ends up stored. Renewal closes that window, and the fence closes
+/// the residual one: every write *and* the commit consult [`Self::check`], so an attempt
+/// that has lost its lease cannot publish anything, whether it was taken over or its own
+/// renewal failed. Loss is always fail-closed: an attempt that cannot prove it still holds
+/// the lease stops rather than racing.
+struct InitLeaseGuard {
+    owner: String,
+    /// Set once this attempt has lost the lease — taken over, or a renewal failed.
+    lost: Arc<AtomicBool>,
+    /// Renewal task. `None` on a single-process backend, where no lease record exists.
+    renewal: Option<tokio::task::JoinHandle<()>>,
+    /// Whether a lease record actually exists and must be released.
+    holds_record: bool,
+}
+
+impl InitLeaseGuard {
+    fn owner(&self) -> &str {
+        &self.owner
+    }
+
+    /// Fail closed if this attempt no longer holds the lease.
+    ///
+    /// Called before every durable write of the initialization sequence and before the
+    /// commit, so a fenced attempt cannot write or commit anything after losing the lease.
+    fn check(&self) -> Result<()> {
+        if self.lost.load(Ordering::SeqCst) {
+            return Err(anyhow!(
+                "this initialization no longer holds its lease — another attempt took it \
+                 over or renewal failed — so it must not write or commit"
+            ));
+        }
+        Ok(())
+    }
+
+    /// Stop the renewal task. Idempotent, and called on every return path of `init`.
+    fn stop_renewal(&mut self) {
+        if let Some(task) = self.renewal.take() {
+            task.abort();
+        }
     }
 }
 
@@ -197,6 +280,8 @@ impl SealService {
             bootstrap_pending: Arc::new(AtomicBool::new(false)),
             #[cfg(test)]
             fail_next_bootstrap: Arc::new(AtomicBool::new(false)),
+            #[cfg(test)]
+            lease_ttl_secs: None,
         }
     }
 
@@ -325,11 +410,19 @@ impl SealService {
         // `Unsupported` here rather than a lock that only appears to lock, and the caller
         // fails closed: initializing on such a backend from two replicas is not something
         // this can make safe, so it refuses instead of proceeding unsafely.
-        let lease = self.acquire_init_lease().await?;
+        //
+        // The guard renews the lease while the attempt runs and fences every write against
+        // it, so an attempt that outlives its TTL is stopped rather than allowed to
+        // interleave with the replica that legitimately took the lease over.
+        let mut lease = self.acquire_init_lease().await?;
 
         let result = self
             .init_under_lease(shares, threshold, root_username, auth, mfa, &lease)
             .await;
+
+        // Stop renewal on every path before releasing: a renewal that fired after the
+        // release would recreate the lease record from an attempt that has already finished.
+        lease.stop_renewal();
 
         // The lease is released on every path — success, failure and early return — but
         // only if this attempt still owns it. A lease that expired and was legitimately
@@ -348,7 +441,7 @@ impl SealService {
         root_username: &str,
         auth: &crate::services::auth::AuthenticationService,
         mfa: &secreton_auth::mfa::CombinedMfaService,
-        lease: &str,
+        lease: &InitLeaseGuard,
     ) -> Result<InitResponse> {
         // Recovery and the guard run under the lock, against a state neither call can
         // change from now on. `recover_partial_initialization` removes a partial attempt
@@ -387,20 +480,24 @@ impl SealService {
         }
     }
 
-    /// Acquire the cross-process initialization lease and return its owner token.
+    /// Acquire the cross-process initialization lease and return a guard holding it.
     ///
     /// The acquire is an insert-if-absent on the lease path, which only one caller can win.
     /// A lease that is already present but expired is replaced with an owner-conditional
     /// write, so a replica that died mid-initialization does not block recovery forever and
     /// does not have its live lease stolen by a replica that merely read a stale expiry.
     ///
+    /// On a backend that arbitrates between processes the returned guard also starts a
+    /// renewal task, so a live attempt keeps its lease for as long as it runs and only a
+    /// genuinely dead holder's lease is ever replaceable.
+    ///
     /// A backend that cannot arbitrate between processes is a hard error: proceeding would
     /// reintroduce exactly the race the lease exists to close.
-    async fn acquire_init_lease(&self) -> Result<String> {
+    async fn acquire_init_lease(&self) -> Result<InitLeaseGuard> {
         use secreton_storage::Coordination;
 
         let owner = Uuid::new_v4().to_string();
-        let expires_at = Utc::now().timestamp() + INIT_LEASE_TTL_SECS as i64;
+        let ttl_secs = self.lease_ttl();
 
         if self.storage.coordination() == Coordination::SingleProcess {
             // A process-local backend cannot be shared between replicas at all — each one
@@ -411,72 +508,144 @@ impl SealService {
                 "Initialization on a single-process backend: the in-process lock is the \
                  complete guarantee, as no second replica can share this storage."
             );
-            return Ok(owner);
+            return Ok(InitLeaseGuard {
+                owner,
+                lost: Arc::new(AtomicBool::new(false)),
+                renewal: None,
+                holds_record: false,
+            });
         }
-
-        let lease_entry = |owner: &str, expires_at: i64| {
-            SecretEntry::new(
-                INIT_LEASE_PATH.to_string(),
-                serde_json::to_vec(&InitLease {
-                    owner: owner.to_string(),
-                    expires_at,
-                })
-                .unwrap_or_default(),
-                EncryptionMetadata::default(),
-                SecurityLevel::Internal,
-                Uuid::nil(),
-            )
-            .owned_by(owner)
-        };
 
         // First attempt: nobody holds it.
         let acquired = self
             .storage
-            .compare_and_set(&lease_entry(&owner, expires_at), Expect::Absent)
+            .compare_and_set(&lease_entry(&owner, ttl_secs), Expect::Absent)
             .await
             .map_err(|e| anyhow!("Failed to acquire the initialization lease: {e}"))?;
-        if acquired {
-            return Ok(owner);
+        if !acquired {
+            // Someone holds it. Replace it only if it has genuinely expired, and only via an
+            // ownership-conditional write against the token that is genuinely there — reading
+            // the record and then writing it unconditionally would race a live holder.
+            let existing = self
+                .storage
+                .get_by_path(INIT_LEASE_PATH)
+                .await
+                .map_err(|e| anyhow!("Failed to read the initialization lease: {e}"))?
+                .ok_or_else(|| {
+                    anyhow!("the initialization lease vanished between acquiring and reading it")
+                })?;
+
+            let held: InitLease = serde_json::from_slice(&existing.encrypted_data)
+                .map_err(|e| anyhow!("corrupt initialization lease record: {e}"))?;
+
+            if !held.is_expired(Utc::now().timestamp()) {
+                return Err(anyhow!(
+                    "another initialization is in progress on this backend; retry once it \
+                     completes or its lease expires"
+                ));
+            }
+
+            let taken_over = self
+                .storage
+                .compare_and_set(&lease_entry(&owner, ttl_secs), Expect::Owner(&held.owner))
+                .await
+                .map_err(|e| {
+                    anyhow!("Failed to take over the expired initialization lease: {e}")
+                })?;
+            if !taken_over {
+                return Err(anyhow!(
+                    "another initialization took over the expired lease first; retry"
+                ));
+            }
+
+            tracing::warn!(
+                "Took over an expired initialization lease. The previous holder may have died \
+                 mid-initialization; its partial state is discarded before this attempt writes."
+            );
         }
 
-        // Someone holds it. Replace it only if it has genuinely expired, and only via an
-        // ownership-conditional write against the token that is genuinely there — reading
-        // the record and then writing it unconditionally would race a live holder.
-        let existing = self
-            .storage
-            .get_by_path(INIT_LEASE_PATH)
-            .await
-            .map_err(|e| anyhow!("Failed to read the initialization lease: {e}"))?
-            .ok_or_else(|| {
-                anyhow!("the initialization lease vanished between acquiring and reading it")
-            })?;
+        let guard = InitLeaseGuard {
+            owner,
+            lost: Arc::new(AtomicBool::new(false)),
+            renewal: None,
+            holds_record: true,
+        };
+        let renewal = self.spawn_lease_renewal(&guard, ttl_secs);
+        Ok(InitLeaseGuard {
+            renewal: Some(renewal),
+            ..guard
+        })
+    }
 
-        let held: InitLease = serde_json::from_slice(&existing.encrypted_data)
-            .map_err(|e| anyhow!("corrupt initialization lease record: {e}"))?;
-
-        if !held.is_expired(Utc::now().timestamp()) {
-            return Err(anyhow!(
-                "another initialization is in progress on this backend; retry once it \
-                 completes or its lease expires"
-            ));
+    /// The lease TTL in force: the production constant, or the test override.
+    fn lease_ttl(&self) -> u64 {
+        #[cfg(test)]
+        if let Some(ttl) = self.lease_ttl_secs {
+            return ttl;
         }
+        INIT_LEASE_TTL_SECS
+    }
 
-        let taken_over = self
-            .storage
-            .compare_and_set(&lease_entry(&owner, expires_at), Expect::Owner(&held.owner))
-            .await
-            .map_err(|e| anyhow!("Failed to take over the expired initialization lease: {e}"))?;
-        if !taken_over {
-            return Err(anyhow!(
-                "another initialization took over the expired lease first; retry"
-            ));
-        }
+    /// Test-only: shorten the initialization lease so a test can exercise expiry and
+    /// renewal in seconds rather than the production five minutes.
+    #[cfg(test)]
+    fn with_lease_ttl(mut self, secs: u64) -> Self {
+        self.lease_ttl_secs = Some(secs);
+        self
+    }
 
-        tracing::warn!(
-            "Took over an expired initialization lease. The previous holder may have died \
-             mid-initialization; its partial state is discarded before this attempt writes."
-        );
-        Ok(owner)
+    /// Renew the held lease at a fraction of its TTL until the task is aborted.
+    ///
+    /// Renewal is an ownership-conditional replace: if the record is gone or carries
+    /// another token, this attempt has lost the lease and the shared `lost` flag is set, so
+    /// every subsequent write and the commit fail closed. A renewal that *errors* is treated
+    /// the same way rather than retried indefinitely — an attempt that cannot prove it holds
+    /// the lease must not keep writing as though it did.
+    fn spawn_lease_renewal(
+        &self,
+        guard: &InitLeaseGuard,
+        ttl_secs: u64,
+    ) -> tokio::task::JoinHandle<()> {
+        let storage = self.storage.clone();
+        let owner = guard.owner.clone();
+        let lost = guard.lost.clone();
+        let interval = std::time::Duration::from_secs((ttl_secs / INIT_LEASE_RENEW_DIVISOR).max(1));
+
+        tokio::spawn(async move {
+            let mut ticker = tokio::time::interval(interval);
+            // The first tick of a `tokio::time::interval` fires immediately; consume it so
+            // renewal starts one interval from now, after the acquisition has settled.
+            ticker.tick().await;
+            loop {
+                ticker.tick().await;
+                if lost.load(Ordering::SeqCst) {
+                    return;
+                }
+                match storage
+                    .compare_and_set(&lease_entry(&owner, ttl_secs), Expect::Owner(&owner))
+                    .await
+                {
+                    Ok(true) => {}
+                    Ok(false) => {
+                        tracing::error!(
+                            "Initialization lease renewal found the lease absent or owned by \
+                             another attempt; fencing this initialization so it cannot write \
+                             or commit."
+                        );
+                        lost.store(true, Ordering::SeqCst);
+                        return;
+                    }
+                    Err(e) => {
+                        tracing::error!(
+                            "Initialization lease renewal failed: {e}; fencing this \
+                             initialization so it cannot write or commit."
+                        );
+                        lost.store(true, Ordering::SeqCst);
+                        return;
+                    }
+                }
+            }
+        })
     }
 
     /// Release the lease, but only while this attempt still owns it.
@@ -484,12 +653,21 @@ impl SealService {
     /// A former holder whose lease expired and was taken over must not delete the new
     /// holder's lease: that would reopen the window for a third caller while the second is
     /// still initializing. `delete_owned` is conditional for exactly this reason.
-    async fn release_init_lease(&self, owner: &str) {
-        match self.storage.delete_owned(INIT_LEASE_PATH, owner).await {
+    async fn release_init_lease(&self, guard: &InitLeaseGuard) {
+        if !guard.holds_record {
+            // Single-process or otherwise incapable backend: there is no lease to release,
+            // and `acquire_init_lease` did not create one.
+            return;
+        }
+        match self
+            .storage
+            .delete_owned(INIT_LEASE_PATH, guard.owner())
+            .await
+        {
             Ok(_) => {}
             Err(secreton_storage::StorageError::Unsupported { .. }) => {
-                // Single-process or otherwise incapable backend: there is no lease to
-                // release, and `acquire_init_lease` did not create one.
+                // The backend reported cross-process coordination but cannot delete
+                // conditionally; there is nothing this attempt can safely do here.
             }
             Err(e) => {
                 tracing::error!("Failed to release the initialization lease: {e}");
@@ -507,8 +685,10 @@ impl SealService {
         root_username: &str,
         auth: &crate::services::auth::AuthenticationService,
         mfa: &secreton_auth::mfa::CombinedMfaService,
-        lease: &str,
+        lease: &InitLeaseGuard,
     ) -> Result<InitResponse> {
+        let lease_token = lease.owner();
+
         // 1. Generate Master Key (32 bytes)
         let master_key = secreton_crypto::generate_key(AlgorithmId::Aes256Gcm)?;
 
@@ -525,14 +705,20 @@ impl SealService {
             .map_err(|e| anyhow!("Shamir split failed: {}", e))?;
 
         // 5. Staging marker, before any durable artifact of this initialization.
+        //
+        // Every durable write from here is fenced on the lease: an attempt that has been
+        // taken over, or whose renewal failed, must not publish an artifact. `write_staging`
+        // already fails closed against a foreign owner; `check` extends that to the writes
+        // that go through `store` and to the commit.
+        lease.check()?;
         self.write_staging(
             &InitStaging {
                 root_username: root_username.to_string(),
                 root_entity_id: None,
                 committed: false,
-                owner: Some(lease.to_string()),
+                owner: Some(lease_token.to_string()),
             },
-            lease,
+            lease_token,
         )
         .await?;
 
@@ -540,6 +726,7 @@ impl SealService {
         let config = InitConfig { shares, threshold };
         let config_bytes = serde_json::to_vec(&config)?;
 
+        lease.check()?;
         self.storage
             .store(
                 &SecretEntry::new(
@@ -549,7 +736,7 @@ impl SealService {
                     SecurityLevel::Public,
                     Uuid::nil(),
                 )
-                .owned_by(lease),
+                .owned_by(lease_token),
             )
             .await
             .map_err(|e| anyhow!("Failed to store init config: {}", e))?;
@@ -558,6 +745,7 @@ impl SealService {
         let enc_root_bytes = serde_json::to_vec(&EncryptedRootKey {
             data: encrypted_root,
         })?;
+        lease.check()?;
         self.storage
             .store(
                 &SecretEntry::new(
@@ -567,7 +755,7 @@ impl SealService {
                     SecurityLevel::TopSecret,
                     Uuid::nil(),
                 )
-                .owned_by(lease),
+                .owned_by(lease_token),
             )
             .await
             .map_err(|e| anyhow!("Failed to store root key: {}", e))?;
@@ -614,11 +802,12 @@ impl SealService {
         let result: Result<(secreton_auth::mfa::TotpEnrollment, RootIdentity), anyhow::Error> =
             async {
                 let root_user = auth
-                    .register_bootstrap_root(
+                    .register_bootstrap_root_owned(
                         root_username,
                         Some("root@system.local".to_string()),
                         vec!["root".to_string(), "admin".to_string()],
                         vec!["*".to_string()],
+                        Some(lease_token),
                     )
                     .await
                     .map_err(|e| anyhow!("Failed to create root user: {}", e))?;
@@ -633,17 +822,23 @@ impl SealService {
                         root_username: identity.username.clone(),
                         root_entity_id: Some(identity.id.clone()),
                         committed: false,
-                        owner: Some(lease.to_string()),
+                        owner: Some(lease_token.to_string()),
                     },
-                    lease,
+                    lease_token,
                 )
                 .await?;
 
                 // Enable TOTP for Root
                 // IMPORTANT: Must be done BEFORE clearing the root key because PersistentTotpService encrypts the secret!
+                //
+                // The enrollment carries this attempt's lease token, so the cleanup below
+                // can remove it with the ownership-conditional delete it uses for every
+                // other artifact of this attempt. Without the token the enrollment is
+                // invisible to that delete on a shared backend, and a rollback that
+                // reported success would leave an orphaned second factor behind.
                 let user_uuid = Uuid::parse_str(&root_user.id).unwrap_or_default();
                 let totp_config = mfa
-                    .enable_totp(user_uuid, root_user.username.clone())
+                    .enable_totp_owned(user_uuid, root_user.username.clone(), Some(lease_token))
                     .await
                     .map_err(|e| anyhow!("Failed to enable TOTP for root user: {}", e))?;
 
@@ -660,6 +855,7 @@ impl SealService {
         // Persist the created root identity. Reading it back needs no key of its own — it
         // names an account, it does not authenticate one.
         let bytes = serde_json::to_vec(&root_identity)?;
+        lease.check()?;
         self.storage
             .store(
                 &SecretEntry::new(
@@ -669,7 +865,7 @@ impl SealService {
                     SecurityLevel::Internal,
                     Uuid::nil(),
                 )
-                .owned_by(lease),
+                .owned_by(lease_token),
             )
             .await
             .map_err(|e| anyhow!("Failed to store root identity: {}", e))?;
@@ -678,14 +874,20 @@ impl SealService {
         // committed *before* removing it. If the process dies between the two, the marker
         // still says the vault finished — and recovery must verify and keep it rather than
         // delete a working vault.
+        //
+        // The commit is fenced like every write before it: an attempt that lost its lease
+        // must not publish a committed marker, and must not hand its caller shares it can no
+        // longer vouch for. Refusing here is what makes the property "the winning attempt's
+        // shares open the stored root key" hold rather than "whichever attempt wrote last".
+        lease.check()?;
         self.write_staging(
             &InitStaging {
                 root_username: root_identity.username.clone(),
                 root_entity_id: Some(root_identity.id.clone()),
                 committed: true,
-                owner: Some(lease.to_string()),
+                owner: Some(lease_token.to_string()),
             },
-            lease,
+            lease_token,
         )
         .await?;
 
@@ -694,7 +896,10 @@ impl SealService {
         // below, and a later recovery recognises a committed marker and clears it. Failing
         // the whole call here would withhold the shares from the operator while leaving the
         // vault initialised — the one combination nobody can recover from.
-        if !self.remove_required(INIT_STAGING_PATH, Some(lease)).await {
+        if !self
+            .remove_required(INIT_STAGING_PATH, Some(lease_token))
+            .await
+        {
             tracing::warn!(
                 "Initialization committed but its staging marker could not be removed; \
                  recovery will verify and clear it on the next attempt."
@@ -1448,6 +1653,15 @@ mod tests {
     /// The same graph as [`sealed_vault`], over a caller-supplied backend so a test can
     /// inject storage faults without a second service wiring.
     async fn sealed_vault_with_storage(storage: Arc<dyn StorageBackend + Send + Sync>) -> Vault {
+        sealed_vault_with_storage_and_lease_ttl(storage, None).await
+    }
+
+    /// The same graph, with the initialization lease shortened so a test can exercise
+    /// expiry and renewal without waiting the production five minutes.
+    async fn sealed_vault_with_storage_and_lease_ttl(
+        storage: Arc<dyn StorageBackend + Send + Sync>,
+        lease_ttl_secs: Option<u64>,
+    ) -> Vault {
         let crypto = Arc::new(CryptoService::new(storage.clone()).await.unwrap());
 
         let mut config = AuthConfig::default();
@@ -1480,7 +1694,12 @@ mod tests {
                 .await
                 .expect("audit logger"),
         );
-        let seal = Arc::new(SealService::new(storage.clone(), crypto.clone()))
+        let seal = SealService::new(storage.clone(), crypto.clone());
+        let seal = match lease_ttl_secs {
+            Some(ttl) => seal.with_lease_ttl(ttl),
+            None => seal,
+        };
+        let seal = Arc::new(seal)
             .with_auth(Arc::clone(&auth))
             .with_audit(audit.clone());
 
@@ -3340,6 +3559,16 @@ mod tests {
         reached: tokio::sync::Notify,
         resume: tokio::sync::Notify,
         started: std::sync::atomic::AtomicUsize,
+        /// When set, an owner-conditional replace of the lease record fails, as a storage
+        /// fault during renewal would. Presents the renewal-failure path deterministically.
+        fail_lease_renewal: std::sync::atomic::AtomicBool,
+        /// Set the moment a renewal was refused, so a test can wait for the fence instead
+        /// of sleeping a fixed interval.
+        renewal_failed: tokio::sync::Notify,
+        /// When set, the next staging write that happens *after* a TOTP enrollment exists
+        /// fails once, injecting a storage fault in the window finding #1 is about.
+        fail_staging_after_totp: std::sync::atomic::AtomicBool,
+        staging_fault_fired: std::sync::atomic::AtomicBool,
     }
 
     impl SharedCrossProcessBackend {
@@ -3350,7 +3579,24 @@ mod tests {
                 reached: tokio::sync::Notify::new(),
                 resume: tokio::sync::Notify::new(),
                 started: std::sync::atomic::AtomicUsize::new(0),
+                fail_lease_renewal: std::sync::atomic::AtomicBool::new(false),
+                renewal_failed: tokio::sync::Notify::new(),
+                fail_staging_after_totp: std::sync::atomic::AtomicBool::new(false),
+                staging_fault_fired: std::sync::atomic::AtomicBool::new(false),
             }
+        }
+
+        async fn totp_exists(&self) -> bool {
+            !self
+                .inner
+                .list(
+                    &secreton_storage::QueryParams::new().with_path_prefix(
+                        crate::services::mfa_persistence::TOTP_PREFIX.to_string(),
+                    ),
+                )
+                .await
+                .expect("list")
+                .is_empty()
         }
 
         async fn maybe_pause(&self, path: &str) {
@@ -3399,6 +3645,40 @@ mod tests {
             entry: &SecretEntry,
             expect: Expect<'_>,
         ) -> StorageResult<bool> {
+            // A renewal — an owner-conditional replace of the lease record — is the one
+            // operation the fault targets, so acquisition (insert-if-absent) still succeeds
+            // and only the attempt's continued holding of the lease is broken.
+            if entry.path == INIT_LEASE_PATH
+                && matches!(expect, Expect::Owner(_))
+                && self
+                    .fail_lease_renewal
+                    .load(std::sync::atomic::Ordering::SeqCst)
+            {
+                self.renewal_failed.notify_one();
+                return Err(secreton_storage::StorageError::BackendError {
+                    backend: "fault-injected".to_string(),
+                    message: "injected lease renewal failure".to_string(),
+                });
+            }
+            // A one-shot staging fault, but only once the enrollment exists, so the failure
+            // lands in the window where the account and its second factor are already stored
+            // and cleanup must remove them.
+            if entry.path == INIT_STAGING_PATH
+                && self
+                    .fail_staging_after_totp
+                    .load(std::sync::atomic::Ordering::SeqCst)
+                && self.totp_exists().await
+                && self
+                    .fail_staging_after_totp
+                    .swap(false, std::sync::atomic::Ordering::SeqCst)
+            {
+                self.staging_fault_fired
+                    .store(true, std::sync::atomic::Ordering::SeqCst);
+                return Err(secreton_storage::StorageError::BackendError {
+                    backend: "fault-injected".to_string(),
+                    message: "injected staging failure after TOTP enrollment".to_string(),
+                });
+            }
             // The staging write goes through this path on a cross-process backend, so the
             // pause has to be here for a test to park an attempt inside its write sequence.
             self.maybe_pause(&entry.path).await;
@@ -3575,6 +3855,266 @@ mod tests {
                 .expect("storage")
                 .is_none(),
             "a completed initialization must release its lease"
+        );
+    }
+
+    /// Every durable artifact of an initialization, by path, as a list a test can assert on.
+    async fn initialization_artifact_paths(
+        storage: &Arc<dyn StorageBackend + Send + Sync>,
+        root_username: &str,
+    ) -> Vec<String> {
+        let mut present = Vec::new();
+        for path in [
+            INIT_PATH,
+            ROOT_KEY_PATH,
+            ROOT_IDENTITY_PATH,
+            INIT_STAGING_PATH,
+            INIT_LEASE_PATH,
+        ] {
+            if storage.get_by_path(path).await.expect("storage").is_some() {
+                present.push(path.to_string());
+            }
+        }
+        let user_path = format!(
+            "{}{}",
+            crate::services::auth::USER_STORAGE_PREFIX,
+            root_username
+        );
+        if storage
+            .get_by_path(&user_path)
+            .await
+            .expect("storage")
+            .is_some()
+        {
+            present.push(user_path);
+        }
+        let enrollments = storage
+            .list(
+                &secreton_storage::QueryParams::new()
+                    .with_path_prefix(crate::services::mfa_persistence::TOTP_PREFIX.to_string()),
+            )
+            .await
+            .expect("list");
+        present.extend(enrollments.into_iter().map(|e| e.path));
+        present
+    }
+
+    #[tokio::test]
+    async fn a_failed_cross_process_init_removes_every_owned_artifact_and_allows_a_retry() {
+        // Regression (severe): on a backend shared between processes, cleanup removes an
+        // attempt's artifacts with `delete_owned`, which only deletes a record that carries
+        // that attempt's lease token. The root account and its TOTP enrollment were written
+        // *without* a token, so a failed initialization's cleanup could not remove them: the
+        // read-back saw an unowned record, reported the removal as a failure, and left the
+        // staging marker behind. Every retry then ran the same failing cleanup and the vault
+        // was permanently uninitialisable — after `init` had already reported an error, so
+        // the operator had no reason to expect a stuck vault.
+        //
+        // The fixed property: a failed attempt's account and enrollment carry the attempt's
+        // token and are removed, the marker is removed only once they are gone, and a retry
+        // succeeds with exactly one enrollment.
+        let _env = crate::test_support::without_root_key();
+        // A pause path that is never written: this test needs the cross-process
+        // coordination and the ownership token, not the parking behaviour.
+        let storage = Arc::new(SharedCrossProcessBackend::new("never/written"));
+        let storage_dyn: Arc<dyn StorageBackend + Send + Sync> = storage.clone();
+        let vault = Arc::new(sealed_vault_with_storage(storage_dyn.clone()).await);
+
+        // Fail the commit-time staging write, which is the first one after the enrollment
+        // exists — the window where the account and second factor are already stored.
+        storage
+            .fail_staging_after_totp
+            .store(true, std::sync::atomic::Ordering::SeqCst);
+
+        let first = vault
+            .seal
+            .init(3, 2, "cross-root", &vault.auth, &vault.mfa)
+            .await;
+        assert!(
+            first.is_err(),
+            "the injected staging failure must fail `init`: {:?}",
+            first.as_ref().err().map(|e| e.to_string())
+        );
+        assert!(
+            storage
+                .staging_fault_fired
+                .load(std::sync::atomic::Ordering::SeqCst),
+            "the fault must actually have fired, or this test proves nothing"
+        );
+
+        // Every artifact the failed attempt created is gone — including the account and the
+        // TOTP enrollment, which only the ownership token made removable.
+        let leftovers = initialization_artifact_paths(&storage_dyn, "cross-root").await;
+        assert!(
+            leftovers.is_empty(),
+            "a rolled-back cross-process init must leave no artifact behind, found: {leftovers:?}"
+        );
+        assert!(
+            !vault.seal.is_initialized().await,
+            "a rolled-back init must not advertise an initialised vault"
+        );
+
+        // A retry starts from clean state and succeeds, with exactly one enrollment.
+        let second = vault
+            .seal
+            .init(3, 2, "cross-root", &vault.auth, &vault.mfa)
+            .await
+            .expect("a retry after a fully rolled-back attempt must initialise");
+
+        let enrollments = storage
+            .list(
+                &secreton_storage::QueryParams::new()
+                    .with_path_prefix(crate::services::mfa_persistence::TOTP_PREFIX.to_string()),
+            )
+            .await
+            .expect("list");
+        assert_eq!(
+            enrollments.len(),
+            1,
+            "the retry must produce exactly one TOTP enrollment, not one per attempt"
+        );
+
+        vault.seal.unseal(&second.keys[0]).await.expect("share one");
+        let complete = vault.seal.unseal(&second.keys[1]).await.expect("share two");
+        assert_eq!(
+            claims_of(&complete.root_token.expect("root credential"))["username"],
+            "cross-root"
+        );
+    }
+
+    #[tokio::test]
+    async fn a_renewal_failure_fences_the_attempt_so_it_cannot_commit() {
+        // Regression (severe): the lease had a fixed expiry and no renewal, so an attempt
+        // that outlived its TTL could keep writing after a second replica legitimately took
+        // the lease over — and could return shares that do not open the root key that ended
+        // up stored. The fix renews the lease while the attempt runs and fences every write
+        // and the commit against it, so an attempt that cannot prove it still holds the lease
+        // stops instead of racing.
+        //
+        // This forces the fence deterministically: renewal is failed via the backend while
+        // the attempt is parked mid-sequence. The attempt must fail closed rather than commit
+        // under a lease it no longer holds.
+        let _env = crate::test_support::without_root_key();
+        let storage = Arc::new(SharedCrossProcessBackend::new(INIT_PATH));
+        let storage_dyn: Arc<dyn StorageBackend + Send + Sync> = storage.clone();
+        // A one-second TTL makes the renewal interval one second, so the real renewal task
+        // runs during the parked window rather than after the test has finished.
+        let vault =
+            Arc::new(sealed_vault_with_storage_and_lease_ttl(storage_dyn.clone(), Some(3)).await);
+
+        storage
+            .fail_lease_renewal
+            .store(true, std::sync::atomic::Ordering::SeqCst);
+
+        let attempt = {
+            let vault = vault.clone();
+            tokio::spawn(async move {
+                vault
+                    .seal
+                    .init(3, 2, "fenced-root", &vault.auth, &vault.mfa)
+                    .await
+            })
+        };
+
+        // Parked inside the root-key write, past staging and the init config.
+        storage.reached.notified().await;
+        // Wait for a renewal to be refused, which sets the fence.
+        storage.renewal_failed.notified().await;
+        storage.resume.notify_one();
+
+        let outcome = attempt.await.expect("the attempt task must not panic");
+        assert!(
+            outcome.is_err(),
+            "an attempt whose lease renewal failed must fail closed, not commit"
+        );
+
+        // Nothing committed, and the vault is not advertised as initialised.
+        assert!(
+            !vault.seal.is_initialized().await,
+            "a fenced attempt must not leave an initialised vault"
+        );
+        let leftovers = initialization_artifact_paths(&storage_dyn, "fenced-root").await;
+        assert!(
+            leftovers.is_empty(),
+            "a fenced attempt must roll its artifacts back, found: {leftovers:?}"
+        );
+
+        // With renewal healthy again, a retry initialises and its shares open the key.
+        storage
+            .fail_lease_renewal
+            .store(false, std::sync::atomic::Ordering::SeqCst);
+        let retry = vault
+            .seal
+            .init(3, 2, "fenced-root", &vault.auth, &vault.mfa)
+            .await
+            .expect("a retry after a fenced attempt must initialise");
+        vault.seal.unseal(&retry.keys[0]).await.expect("share one");
+        let complete = vault.seal.unseal(&retry.keys[1]).await.expect("share two");
+        assert_eq!(
+            claims_of(&complete.root_token.expect("root credential"))["username"],
+            "fenced-root"
+        );
+    }
+
+    #[tokio::test]
+    async fn a_live_attempt_holds_its_lease_past_the_ttl_and_is_not_taken_over() {
+        // The counterpart to the fence: renewal must actually extend a live attempt's lease.
+        // Without renewal an attempt that runs longer than its TTL has its lease legitimately
+        // taken over by a second replica, which is exactly the overlap the lease exists to
+        // prevent. This parks an attempt past its TTL and shows a second replica is still
+        // refused — falsified by removing the renewal task, after which the second replica
+        // takes over the expired lease.
+        let _env = crate::test_support::without_root_key();
+        let storage = Arc::new(SharedCrossProcessBackend::new(INIT_PATH));
+        let storage_dyn: Arc<dyn StorageBackend + Send + Sync> = storage.clone();
+
+        let replica_a =
+            Arc::new(sealed_vault_with_storage_and_lease_ttl(storage_dyn.clone(), Some(3)).await);
+        let replica_b =
+            Arc::new(sealed_vault_with_storage_and_lease_ttl(storage_dyn.clone(), Some(3)).await);
+
+        let first = {
+            let replica_a = replica_a.clone();
+            tokio::spawn(async move {
+                replica_a
+                    .seal
+                    .init(3, 2, "renewed-root", &replica_a.auth, &replica_a.mfa)
+                    .await
+            })
+        };
+
+        storage.reached.notified().await;
+        // Hold the attempt past its one-second TTL, several renewal intervals.
+        tokio::time::sleep(std::time::Duration::from_secs(3)).await;
+
+        let loser = replica_b
+            .seal
+            .init(3, 2, "usurper-root", &replica_b.auth, &replica_b.mfa)
+            .await;
+        assert!(
+            loser.is_err(),
+            "a live attempt that renewed its lease must not be taken over after its original \
+             TTL elapses"
+        );
+
+        storage.resume.notify_one();
+        let winner = first
+            .await
+            .expect("the winner task must not panic")
+            .expect("the renewed attempt must complete");
+        replica_a
+            .seal
+            .unseal(&winner.keys[0])
+            .await
+            .expect("share one");
+        let complete = replica_a
+            .seal
+            .unseal(&winner.keys[1])
+            .await
+            .expect("the winner's shares must open the stored root key");
+        assert_eq!(
+            claims_of(&complete.root_token.expect("root credential"))["username"],
+            "renewed-root"
         );
     }
 }

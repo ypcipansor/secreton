@@ -93,6 +93,23 @@ impl TotpService for PersistentTotpService {
         entity_id: Uuid,
         account_name: String,
     ) -> Result<TotpEnrollment, SecretonError> {
+        self.enroll_owned(entity_id, account_name, None).await
+    }
+
+    /// Persist the enrollment with the attempt's owner token when one is supplied.
+    ///
+    /// `enable_totp` from the ordinary MFA setup path passes `None`, which keeps the
+    /// record unowned and therefore ineligible for an ownership-conditional cleanup — the
+    /// right behaviour for a user-managed enrollment, which no rollback should remove.
+    /// Initialization passes its lease token so a failed attempt's cleanup can remove the
+    /// enrollment it created; on a shared backend that cleanup only deletes records whose
+    /// token matches, so a token-less enrollment would be invisible to it.
+    async fn enroll_owned(
+        &self,
+        entity_id: Uuid,
+        account_name: String,
+        owner: Option<&str>,
+    ) -> Result<TotpEnrollment, SecretonError> {
         let _user_lock = self.acquire_user_lock(entity_id).await;
         let _guard = _user_lock.lock().await;
 
@@ -134,13 +151,16 @@ impl TotpService for PersistentTotpService {
 
         let path = format!("{}{}", TOTP_PREFIX, entity_id);
 
-        let entry = SecretEntry::new(
+        let mut entry = SecretEntry::new(
             path,
             encrypted_data,
             EncryptionMetadata::default(),
             SecurityLevel::Secret,
             entity_id,
         );
+        if let Some(owner) = owner {
+            entry = entry.owned_by(owner);
+        }
 
         self.storage
             .store(&entry)

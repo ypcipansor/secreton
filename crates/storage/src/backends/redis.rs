@@ -297,36 +297,68 @@ impl StorageBackend for RedisBackend {
         let entry_key = format!("secreton:entry:{}", id);
         let mut conn = self.manager.lock().await;
 
-        // Read the entry first so its path mapping is removed with it; leaving the mapping
-        // behind would make `get_by_path` resolve an id that no longer exists, which reads
-        // as a missing record rather than a stale index.
-        let value: Option<String> =
-            conn.get(&entry_key)
+        // One server-side script removes the entry and the path mapping that points at it,
+        // and it removes the mapping only while the mapping still resolves to this id.
+        //
+        // The previous implementation read the entry, deleted the entry key, and then
+        // unconditionally deleted `secreton:path:<entry.path>`. If the path had been
+        // rewritten between the read and the delete — a concurrent `store` or
+        // `compare_and_set` publishing a replacement — that second delete removed the
+        // *replacement's* mapping. The replacement's entry key survived, but nothing could
+        // reach it by path any more, so it was lost while `get_by_path` reported a missing
+        // record. Comparing the mapping's current value against the id being deleted is what
+        // keeps a replacement reachable.
+        let script = redis::Script::new(
+            r"
+            local mapping = redis.call('GET', KEYS[1])
+            local removed = redis.call('DEL', KEYS[2])
+            if removed > 0 and mapping == ARGV[1] then
+                redis.call('DEL', KEYS[1])
+            end
+            return removed
+            ",
+        );
+
+        // The path key is derived from the entry itself, which is what the mapping names,
+        // so it can be computed here without a read. A record whose path is empty has no
+        // mapping.
+        let path_key = {
+            let stored: Option<String> =
+                conn.get(&entry_key)
+                    .await
+                    .map_err(|e| StorageError::QueryFailed {
+                        message: format!("Failed to read entry before delete: {}", e),
+                    })?;
+            match stored.as_deref().and_then(|json| {
+                serde_json::from_str::<SecretEntry>(json)
+                    .ok()
+                    .map(|entry| entry.path)
+            }) {
+                Some(path) if !path.is_empty() => format!("secreton:path:{}", path),
+                _ => String::new(),
+            }
+        };
+
+        let removed: i64 = if path_key.is_empty() {
+            // No mapping to consider; delete the entry alone.
+            let removed: u64 =
+                conn.del(&entry_key)
+                    .await
+                    .map_err(|e| StorageError::QueryFailed {
+                        message: format!("Failed to delete entry: {}", e),
+                    })?;
+            removed as i64
+        } else {
+            script
+                .key(&path_key)
+                .key(&entry_key)
+                .arg(id.to_string())
+                .invoke_async(&mut *conn)
                 .await
                 .map_err(|e| StorageError::QueryFailed {
-                    message: format!("Failed to read entry before delete: {}", e),
-                })?;
-
-        let removed: u64 = conn
-            .del(&entry_key)
-            .await
-            .map_err(|e| StorageError::QueryFailed {
-                message: format!("Failed to delete entry: {}", e),
-            })?;
-
-        if removed > 0
-            && let Some(json_str) = value
-            && let Ok(entry) = serde_json::from_str::<SecretEntry>(&json_str)
-            && !entry.path.is_empty()
-        {
-            let path_key = format!("secreton:path:{}", entry.path);
-            let _: () = conn
-                .del(&path_key)
-                .await
-                .map_err(|e| StorageError::QueryFailed {
-                    message: format!("Failed to delete path mapping: {}", e),
-                })?;
-        }
+                    message: format!("Failed to delete entry: {}", e),
+                })?
+        };
 
         Ok(removed > 0)
     }

@@ -50,6 +50,24 @@ pub trait TotpService: Send + Sync {
         issuer: String,
     ) -> Result<TotpEnrollment, SecretonError>;
 
+    /// Enroll an entity for TOTP, stamping the persisted enrollment with an owner token.
+    ///
+    /// Initialization enrolls the root account's TOTP through this, so the record carries
+    /// the same fencing token as the rest of the attempt. Cleanup removes an attempt's
+    /// artifacts with `delete_owned`, which matches on that token; an enrollment written
+    /// without one is invisible to that path on a shared backend, which is what left an
+    /// orphaned second factor behind a rollback that reported success. Backends without a
+    /// conditional delete ignore the token and delegate to `enroll`.
+    async fn enroll_owned(
+        &self,
+        entity_id: Uuid,
+        account_name: String,
+        owner: Option<&str>,
+    ) -> Result<TotpEnrollment, SecretonError> {
+        let _ = owner;
+        self.enroll(entity_id, account_name).await
+    }
+
     /// Validate a TOTP code
     async fn validate(&self, request: TotpValidationRequest) -> Result<bool, SecretonError>;
 
