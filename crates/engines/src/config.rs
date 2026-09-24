@@ -82,6 +82,19 @@ pub struct HttpConfig {
     /// number lets a client forge its own address by prepending entries.
     #[serde(default)]
     pub trusted_proxies: usize,
+
+    /// Declare that every connection into this process arrives over TLS even though the
+    /// request itself cannot say so.
+    ///
+    /// The URI does not report TLS reliably: an HTTP/1.1 request in origin-form carries no
+    /// scheme, and an HTTP/2 `:scheme` is client-supplied. A TLS-terminating listener marks
+    /// the connection instead, and this setting is for a deployment where that marker is
+    /// unavailable — for example a TLS terminator on the same host that forwards a stream
+    /// the runtime does not identify as TLS. When true, the session cookie carries `Secure`
+    /// and responses assert HSTS. It does not make the process trust `X-Forwarded-Proto`;
+    /// that is still gated by `trusted_proxies`.
+    #[serde(default)]
+    pub https_only: bool,
 }
 
 /// gRPC server configuration
@@ -518,6 +531,7 @@ impl Default for HttpConfig {
             compression: true,
             static_files: None,
             trusted_proxies: 0,
+            https_only: false,
         }
     }
 }
@@ -669,6 +683,7 @@ mod tests {
         ServerConfig {
             http: HttpConfig {
                 trusted_proxies: 0,
+                https_only: false,
                 bind_address: SocketAddr::new(IpAddr::V4(Ipv4Addr::LOCALHOST), 8200),
                 timeout: 30,
                 max_body_size: 5 * 1024 * 1024,

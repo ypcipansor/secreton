@@ -119,7 +119,12 @@ dengan nama tersebut; identitasnya disimpan agar `unseal` menerbitkan token untu
 bukan untuk nama tetap `"root"`. Token tersebut berlaku satu jam (TTL bootstrap tetap, tidak
 mengikuti session timeout yang dapat dikonfigurasi), dan hanya setelah threshold share
 tercapai. Jika penerbitan token gagal setelah barrier terbuka, ulangi panggilan `unseal`
-selama proses belum restart; vault tetap terbuka di memori dan tidak perlu share lagi.
+selama proses belum restart; vault tetap terbuka di memori. Retry itu tidak menghidupkan
+kembali master key dan tidak butuh threshold share lagi, tetapi tetap menuntut bukti
+kepemilikan salah satu share yang tadi membuka barrier: satu share yang valid sudah cukup.
+Tanpa bukti itu, flag pending saja tidak boleh menerbitkan kredensial — `sys/unseal` adalah
+route publik, dan menerbitkan token paling istimewa di sistem hanya karena sebuah flag akan
+menjadikannya jalur eskalasi tanpa autentikasi.
 Retry ini tidak bertahan melewati restart: root key hanya ada di memori, sehingga setelah
 restart vault harus di-unseal kembali dengan share-nya.
 
@@ -239,6 +244,15 @@ bahasa tersendiri, bukan string yang dicocokkan.
 
 Token disimpan berdasarkan accessor, sehingga revocation tidak memerlukan penyimpanan nilai
 token itu sendiri.
+
+Refresh token hanya boleh ditukar sekali, dan jaminan itu berlaku lintas replika: klaim
+single-use ("reservation") diambil di backend bersama sebelum kerja apa pun yang bisa gagal,
+di path yang diturunkan dari hash token — bukan token itu sendiri — dengan insert-if-absent.
+Penukaran yang gagal melepas klaim secara owner-conditional, sehingga klaim percobaan lain
+yang sudah mengambilnya tidak ikut terhapus; penukaran yang berhasil meninggalkan klaim itu
+sebagai revocation permanen, sehingga token yang sama tidak bisa ditukar lagi. Backend yang
+tidak dapat berkoordinasi lintas proses (`Coordination::SingleProcess`) memakai reservation
+in-memory saja, dan itu adalah jaminan lengkapnya karena tidak ada replika kedua.
 
 ### 2.6 AuditEvent
 

@@ -55,6 +55,63 @@ enum RedisTransactionOp {
     Delete(Uuid),
 }
 
+/// The Lua script a transaction commit runs, one invocation per mutating operation.
+///
+/// A commit previously wrote only `secreton:entry:*`. The path mapping `secreton:path:*`
+/// — which is how `get_by_path`, `exists`, `list` and `count` reach a record — was left
+/// untouched, so a record written inside a transaction was invisible to every read that
+/// resolves by path, and a record deleted inside one left its mapping behind pointing at a
+/// missing entry. Doing the mapping maintenance here, in one server-side step, keeps it
+/// atomic with the body write and consistent with [`RedisBackend::store`] and
+/// [`RedisBackend::compare_and_set`].
+///
+/// The delete branch removes the mapping only while it still names the id being deleted, the
+/// same guard `delete_by_id` uses: a path rewritten since the transaction staged the delete
+/// must stay reachable through its replacement.
+///
+/// KEYS[1]=path key ('' when the entry has no path), KEYS[2]=entry key.
+/// ARGV: [1]=mode (`write`|`delete`), [2]=entry json, [3]=id, [4]=absolute expiry second or
+/// '' , [5]=superseded entry key to drop or ''.
+const TRANSACTION_SCRIPT: &str = r"
+    local mode = ARGV[1]
+    local path_key = KEYS[1]
+    local entry_key = KEYS[2]
+    local id = ARGV[3]
+    local superseded_key = ARGV[5]
+
+    local function set_maybe_expiring(key, value, expires)
+        if expires ~= '' then
+            local ttl = tonumber(expires) - tonumber(redis.call('TIME')[1])
+            if ttl <= 0 then
+                redis.call('DEL', key)
+                return
+            end
+            redis.call('SET', key, value)
+            redis.call('PEXPIRE', key, ttl * 1000)
+        else
+            redis.call('SET', key, value)
+        end
+    end
+
+    if mode == 'write' then
+        if superseded_key ~= '' then
+            redis.call('DEL', superseded_key)
+        end
+        set_maybe_expiring(entry_key, ARGV[2], ARGV[4])
+        if path_key ~= '' then
+            set_maybe_expiring(path_key, id, ARGV[4])
+        end
+        return 1
+    end
+
+    local mapping = redis.call('GET', path_key)
+    local removed = redis.call('DEL', entry_key)
+    if removed > 0 and mapping == id then
+        redis.call('DEL', path_key)
+    end
+    return removed
+";
+
 impl RedisTransaction {
     pub fn new(manager: Arc<Mutex<ConnectionManager>>) -> Self {
         Self {
@@ -62,6 +119,25 @@ impl RedisTransaction {
             operations: Vec::new(),
             committed: false,
         }
+    }
+
+    /// Resolve the id a path currently maps to, so a write can drop the record it supersedes
+    /// and a delete can tell whether the mapping still names the id being deleted.
+    async fn current_mapping(
+        conn: &mut redis::aio::ConnectionManager,
+        path: &str,
+    ) -> StorageResult<Option<Uuid>> {
+        if path.is_empty() {
+            return Ok(None);
+        }
+        let key = format!("secreton:path:{}", path);
+        let value: Option<String> =
+            conn.get(&key)
+                .await
+                .map_err(|e| StorageError::QueryFailed {
+                    message: format!("Failed to read path mapping: {}", e),
+                })?;
+        Ok(value.as_deref().and_then(|v| Uuid::parse_str(v).ok()))
     }
 }
 
@@ -106,45 +182,112 @@ impl StorageTransaction for RedisTransaction {
             });
         }
 
-        // Get Redis connection from backend and execute all operations
+        // Every operation goes through the transaction script, so the entry body and the
+        // path mapping that reaches it are written, superseded and removed together. The
+        // mapping maintenance is what `store` and `compare_and_set` do and what this commit
+        // previously omitted, leaving transaction writes invisible to `get_by_path`/`list`
+        // and transaction deletes leaving orphaned mappings.
         let mut conn = self.manager.lock().await;
-        let mut pipe = redis::pipe();
-        pipe.atomic();
 
         for op in self.operations {
             match op {
                 RedisTransactionOp::Store(entry) | RedisTransactionOp::Update(entry) => {
-                    let key = format!("secreton:entry:{}", entry.id);
+                    let entry_key = format!("secreton:entry:{}", entry.id);
                     let value = serde_json::to_string(&entry).map_err(|e| {
                         StorageError::SerializationError {
                             message: e.to_string(),
                         }
                     })?;
 
-                    if let Some(expires_at) = entry.expires_at {
-                        let ttl = (expires_at - Utc::now()).num_seconds();
-                        if ttl > 0 {
-                            pipe.set_ex(&key, value, u64::try_from(ttl).unwrap_or(0));
+                    let path_key = if entry.path.is_empty() {
+                        String::new()
+                    } else {
+                        format!("secreton:path:{}", entry.path)
+                    };
+
+                    // A rewrite under a fresh id leaves the previous entry key behind; it
+                    // must be dropped so it cannot surface in an enumeration after its
+                    // mapping has moved on.
+                    let superseded_key = if let Some(old_id) =
+                        Self::current_mapping(&mut conn, &entry.path).await?
+                    {
+                        if old_id != entry.id {
+                            format!("secreton:entry:{}", old_id)
                         } else {
-                            // Already expired, ensure it is removed
-                            pipe.del(&key);
+                            String::new()
                         }
                     } else {
-                        pipe.set(&key, value);
-                    }
+                        String::new()
+                    };
+
+                    // An already-expired write must not resurrect the path: signal an empty
+                    // deadline of '' and let the script's TTL branch see a non-positive ttl
+                    // and delete both keys.
+                    let expires = entry
+                        .expires_at
+                        .map(|at| at.timestamp().to_string())
+                        .unwrap_or_default();
+
+                    let keys: Vec<String> = vec![path_key, entry_key];
+                    redis::Script::new(TRANSACTION_SCRIPT)
+                        .key(&keys[0])
+                        .key(&keys[1])
+                        .arg("write")
+                        .arg(&value)
+                        .arg(entry.id.to_string())
+                        .arg(&expires)
+                        .arg(&superseded_key)
+                        .invoke_async::<i64>(&mut *conn)
+                        .await
+                        .map_err(|e| StorageError::QueryFailed {
+                            message: format!("Failed to execute transaction write: {}", e),
+                        })?;
                 }
                 RedisTransactionOp::Delete(id) => {
-                    let key = format!("secreton:entry:{}", id);
-                    pipe.del(&key);
+                    // The mapping key cannot be derived from the id alone — Redis has no
+                    // index from entry to path — so read the entry to learn its path, then
+                    // let the script remove the mapping only while it still names this id.
+                    let entry_key = format!("secreton:entry:{}", id);
+                    let stored: Option<String> =
+                        conn.get(&entry_key)
+                            .await
+                            .map_err(|e| StorageError::QueryFailed {
+                                message: format!("Failed to read entry for transaction: {}", e),
+                            })?;
+                    let path_key = match stored
+                        .as_deref()
+                        .and_then(|json| serde_json::from_str::<SecretEntry>(json).ok())
+                        .map(|entry| entry.path)
+                        .filter(|path| !path.is_empty())
+                    {
+                        Some(path) => format!("secreton:path:{}", path),
+                        None => String::new(),
+                    };
+
+                    if path_key.is_empty() {
+                        conn.del::<_, ()>(&entry_key).await.map_err(|e| {
+                            StorageError::QueryFailed {
+                                message: format!("Failed to delete entry in transaction: {}", e),
+                            }
+                        })?;
+                    } else {
+                        redis::Script::new(TRANSACTION_SCRIPT)
+                            .key(&path_key)
+                            .key(&entry_key)
+                            .arg("delete")
+                            .arg("")
+                            .arg(id.to_string())
+                            .arg("")
+                            .arg("")
+                            .invoke_async::<i64>(&mut *conn)
+                            .await
+                            .map_err(|e| StorageError::QueryFailed {
+                                message: format!("Failed to execute transaction delete: {}", e),
+                            })?;
+                    }
                 }
             }
         }
-
-        pipe.query_async::<()>(&mut *conn)
-            .await
-            .map_err(|e| StorageError::QueryFailed {
-                message: format!("Failed to execute transaction pipeline: {}", e),
-            })?;
 
         self.committed = true;
         Ok(())
@@ -1130,5 +1273,128 @@ mod tests {
         );
 
         backend.delete_by_id(seeded_id).await.expect("cleanup");
+    }
+
+    /// Regression: `RedisTransaction::commit` wrote only `secreton:entry:*`. The path
+    /// mapping `secreton:path:*` — the only way `get_by_path`, `exists`, `list` and `count`
+    /// reach a record — was never written by a transaction, so a committed store was
+    /// invisible to every read that resolves by path, and a committed delete left a mapping
+    /// pointing at a missing entry.
+    #[tokio::test]
+    async fn a_committed_transaction_writes_and_removes_the_path_mapping() {
+        let Some(url) = redis_url() else {
+            return;
+        };
+        let namespace = format!("it/{}", Uuid::new_v4());
+        let path = format!("{namespace}/contract/transaction-mapping");
+        let backend = RedisBackend::new(&url).await.expect("connect");
+
+        // `list`/`count` are database-wide, and other tests may share this server, so scope
+        // the enumeration assertions to this test's own namespace.
+        let scoped = || QueryParams {
+            path_prefix: Some(namespace.clone()),
+            ..QueryParams::default()
+        };
+
+        // Store through a transaction, then commit.
+        let stored = entry_at(&path, b"via-transaction");
+        let stored_id = stored.id;
+        let mut tx = backend.begin_transaction().await.expect("begin");
+        tx.store(&stored).await.expect("stage store");
+        tx.commit().await.expect("commit");
+
+        // Every path-resolving read must see it.
+        let by_path = backend
+            .get_by_path(&path)
+            .await
+            .expect("read by path")
+            .expect("a committed transaction write must be reachable by path");
+        assert_eq!(by_path.id, stored_id);
+        assert!(
+            backend.exists(&path).await.expect("exists"),
+            "a committed transaction write must be reported by exists"
+        );
+        let listed = backend.list(&scoped()).await.expect("list");
+        assert!(
+            listed.iter().any(|e| e.id == stored_id),
+            "a committed transaction write must appear in list"
+        );
+        assert_eq!(
+            backend.count(&scoped()).await.expect("count"),
+            1,
+            "count must include the committed transaction write exactly once"
+        );
+
+        // A transaction delete must remove the mapping too, leaving nothing orphaned.
+        let mut tx = backend.begin_transaction().await.expect("begin");
+        tx.delete(stored_id).await.expect("stage delete");
+        tx.commit().await.expect("commit delete");
+
+        assert!(
+            backend
+                .get_by_path(&path)
+                .await
+                .expect("read after delete")
+                .is_none(),
+            "a committed transaction delete must remove the path mapping"
+        );
+        let mapping: Option<String> = {
+            let mut conn = backend.manager.lock().await;
+            conn.get(format!("secreton:path:{}", path))
+                .await
+                .expect("read mapping")
+        };
+        assert!(
+            mapping.is_none(),
+            "a committed transaction delete must not leave an orphaned mapping"
+        );
+        assert_eq!(backend.count(&scoped()).await.expect("count"), 0);
+    }
+
+    /// A transaction that rewrites a path under a fresh id must supersede the previous
+    /// record: repoint the mapping and drop the old entry key, so an enumeration does not
+    /// report both and the old id does not resolve.
+    #[tokio::test]
+    async fn a_committed_transaction_rewrite_supersedes_the_previous_record() {
+        let Some(url) = redis_url() else {
+            return;
+        };
+        let namespace = format!("it/{}", Uuid::new_v4());
+        let path = format!("{namespace}/contract/transaction-rewrite");
+        let backend = RedisBackend::new(&url).await.expect("connect");
+
+        let first = entry_at(&path, b"first");
+        let first_id = first.id;
+        backend.store(&first).await.expect("seed");
+
+        let second = entry_at(&path, b"second");
+        let second_id = second.id;
+        assert_ne!(first_id, second_id);
+        let mut tx = backend.begin_transaction().await.expect("begin");
+        tx.store(&second).await.expect("stage rewrite");
+        tx.commit().await.expect("commit rewrite");
+
+        let resolved = backend
+            .get_by_path(&path)
+            .await
+            .expect("read by path")
+            .expect("the rewrite must resolve");
+        assert_eq!(
+            resolved.id, second_id,
+            "the path must resolve to the rewritten record"
+        );
+        assert!(
+            backend.get_by_id(first_id).await.expect("by id").is_none(),
+            "the superseded entry key must be dropped"
+        );
+        let scoped = QueryParams {
+            path_prefix: Some(namespace.clone()),
+            ..QueryParams::default()
+        };
+        assert_eq!(
+            backend.count(&scoped).await.expect("count"),
+            1,
+            "the superseded record must not be counted as well"
+        );
     }
 }

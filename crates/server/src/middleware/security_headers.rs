@@ -26,26 +26,44 @@ use secreton_domain::csp::{
 };
 use secreton_domain::proxy::{ResolvedScheme, Scheme, effective_scheme};
 
-/// How many proxy hops in front of this process are trusted for scheme resolution.
+/// How the scheme is resolved: how many proxy hops are trusted, and whether every
+/// connection this process accepts is already TLS.
 ///
-/// Carried as middleware state rather than read from the environment, so the middleware
-/// and the rest of the process share one configured value.
+/// Carried as middleware state rather than read from the environment, so the middleware and
+/// the rest of the process share one configured value.
 #[derive(Debug, Clone, Copy)]
-pub struct TrustedProxies(pub usize);
+pub struct SchemePolicy {
+    /// Proxy hops in front of this process trusted for `X-Forwarded-Proto`. Zero — the
+    /// default — means the header is ignored entirely and only the observed connection
+    /// decides.
+    pub trusted_proxies: usize,
+    /// Declare that the connection into this process is TLS even though the request cannot
+    /// say so. Set this only when the listener itself terminates TLS or a same-host
+    /// terminator hands the process a TLS connection; a proxy that forwards to this process
+    /// over plain HTTP is described by `trusted_proxies`, not this.
+    pub https_only: bool,
+}
 
 pub async fn apply(
-    State(TrustedProxies(trusted_proxies)): State<TrustedProxies>,
+    State(SchemePolicy {
+        trusted_proxies,
+        https_only,
+    }): State<SchemePolicy>,
     mut request: Request,
     next: Next,
 ) -> Response {
-    // Decide the scheme once, from the observed connection and the configured trust in
-    // proxies. This is the same resolution `crates/ui` uses for the cookie's `Secure`
-    // attribute, so the two headers cannot disagree about whether a request was secure.
+    // Decide the scheme once, from the connection and the configured trust in proxies.
+    // This is the same resolution `crates/ui` uses for the cookie's `Secure` attribute, so
+    // the two headers cannot disagree about whether a request was secure.
+    //
+    // The transport's TLS state is never read from the URI. `request.uri().scheme_str()`
+    // is empty for an HTTP/1.1 request in origin-form — which is every request a browser
+    // sends — so a process serving TLS saw "not https" and dropped both `Secure` and HSTS;
+    // and on HTTP/2 the scheme is a client-supplied `:scheme` pseudo-header, so trusting it
+    // let a cleartext client forge one. `https_only` is the operator's declaration that the
+    // listener terminates TLS, which the URI cannot express.
     let scheme = effective_scheme(
-        request
-            .uri()
-            .scheme_str()
-            .is_some_and(|s| s.eq_ignore_ascii_case("https")),
+        https_only,
         request
             .headers()
             .get("x-forwarded-proto")
@@ -145,6 +163,23 @@ mod tests {
         forwarded: Option<&str>,
         behaviour: Behaviour,
     ) -> Response {
+        response_for_policy(
+            SchemePolicy {
+                trusted_proxies,
+                https_only: false,
+            },
+            forwarded,
+            behaviour,
+        )
+        .await
+    }
+
+    /// The full-policy variant, so a test can set `https_only` and the TLS marker.
+    async fn response_for_policy(
+        policy: SchemePolicy,
+        forwarded: Option<&str>,
+        behaviour: Behaviour,
+    ) -> Response {
         let app = Router::new()
             .route(
                 "/",
@@ -176,10 +211,7 @@ mod tests {
                     }
                 }),
             )
-            .layer(middleware::from_fn_with_state(
-                TrustedProxies(trusted_proxies),
-                apply,
-            ));
+            .layer(middleware::from_fn_with_state(policy, apply));
 
         let mut builder = Request::builder().uri("/");
         if let Some(value) = forwarded {
@@ -374,5 +406,123 @@ mod tests {
         // With a proxy declared, its forwarded scheme is honoured.
         let proxied = response_for(1, Some("https"), Behaviour::Plain).await;
         assert!(proxied.headers().contains_key(STRICT_TRANSPORT_SECURITY));
+    }
+
+    #[tokio::test]
+    async fn a_direct_tls_connection_asserts_hsts_without_a_forwarded_header() {
+        // Regression (CWE-614): the transport TLS state was read from
+        // `request.uri().scheme_str()`, which is `None` for an HTTP/1.1 request in
+        // origin-form — every browser request. A process serving TLS therefore classified
+        // the connection as plain HTTP and dropped HSTS (and, through the shared
+        // `ResolvedScheme`, the cookie's `Secure`). With no marker to read on the URI, the
+        // operator's `https_only` is what now tells the middleware the listener is TLS.
+        let secure = response_for_policy(
+            SchemePolicy {
+                trusted_proxies: 0,
+                https_only: true,
+            },
+            None,
+            Behaviour::Plain,
+        )
+        .await;
+        assert!(
+            secure.headers().contains_key(STRICT_TRANSPORT_SECURITY),
+            "a TLS connection must assert HSTS even with no forwarded header"
+        );
+
+        // And the same policy must not believe a forged forwarded header on a plain
+        // connection: the fix adds a declaration, it does not trust the header more.
+        let spoofed = response_for_policy(
+            SchemePolicy {
+                trusted_proxies: 0,
+                https_only: false,
+            },
+            Some("https"),
+            Behaviour::Plain,
+        )
+        .await;
+        assert!(
+            !spoofed.headers().contains_key(STRICT_TRANSPORT_SECURITY),
+            "a client-supplied forwarded header must not turn HSTS on"
+        );
+
+        // The declaration defaults off, so a plain listener must not assert HSTS.
+        let off_by_default = response_for(0, None, Behaviour::Plain).await;
+        assert!(
+            !off_by_default
+                .headers()
+                .contains_key(STRICT_TRANSPORT_SECURITY),
+            "https_only defaults off"
+        );
+    }
+
+    #[tokio::test]
+    async fn an_https_uri_scheme_is_not_evidence_of_tls() {
+        // The previous implementation read the scheme off the request URI. On HTTP/2 that
+        // is a client-supplied `:scheme` pseudo-header, so a cleartext h2c client could
+        // send `:scheme: https` and have its request marked secure. The middleware must not
+        // consult the URI at all, so a request whose URI literally says `https` — driven
+        // through the real middleware — still yields no HSTS when the transport is plain and
+        // no proxy is trusted.
+        let app = Router::new()
+            .route(
+                "/",
+                get(|| async {
+                    Response::builder()
+                        .header(CONTENT_TYPE, "application/json")
+                        .body(Body::from("{}"))
+                        .expect("response")
+                }),
+            )
+            .layer(middleware::from_fn_with_state(
+                SchemePolicy {
+                    trusted_proxies: 0,
+                    https_only: false,
+                },
+                apply,
+            ));
+
+        let forged = app
+            .oneshot(
+                Request::builder()
+                    .uri("https://attacker.example/")
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .expect("response");
+        assert!(
+            !forged.headers().contains_key(STRICT_TRANSPORT_SECURITY),
+            "a URI scheme is attacker-controlled and must not turn HSTS on"
+        );
+    }
+
+    #[tokio::test]
+    async fn https_only_asserts_hsts_for_a_listener_that_cannot_mark_the_connection() {
+        // An operator whose TLS terminator runs in-process on another port, or hands this
+        // process a TLS stream that does not surface as a URI scheme, declares the fact in
+        // configuration. With `trusted_proxies == 0` a forged header still cannot turn HSTS
+        // on; only the declaration can.
+        let declared = response_for_policy(
+            SchemePolicy {
+                trusted_proxies: 0,
+                https_only: true,
+            },
+            None,
+            Behaviour::Plain,
+        )
+        .await;
+        assert!(
+            declared.headers().contains_key(STRICT_TRANSPORT_SECURITY),
+            "https_only must assert HSTS"
+        );
+
+        let off_by_default = response_for(0, None, Behaviour::Plain).await;
+        assert!(
+            !off_by_default
+                .headers()
+                .contains_key(STRICT_TRANSPORT_SECURITY),
+            "https_only defaults off, so a plain listener must not assert HSTS"
+        );
     }
 }

@@ -44,13 +44,26 @@ pub struct SealService {
     // from outside, and a failure between them leaves a vault that is open and
     // unreachable with no way to ask for the credential again.
     //
-    // In-process only, by design. The retry it enables works exactly as long as the root
-    // key the barrier was opened with is still in memory: a restart clears that key
-    // (`CryptoService::clear_root_key` on drop, and no key in the environment), so there
-    // is nothing left to mint a credential from and an unseal must present shares again.
-    // Persisting this flag would not change that, so it is not persisted — and every
-    // message and document that describes the retry says so.
+    // The retry it authorises is *not* shareless. Whoever asks for the owed credential
+    // must still prove they hold a share that belongs to this vault, because the
+    // credential is the root token: minting it from the flag alone would hand the most
+    // privileged token in the system to an unauthenticated caller of the public
+    // `sys/unseal` route. See `bootstrap_share_proof`.
+    //
+    // In-process only. The proof is bound to the specific shares the barrier was opened
+    // with, and a restart discards both the in-memory root key and the proof, so after a
+    // restart the vault must be unsealed again with its shares.
     bootstrap_pending: Arc<AtomicBool>,
+
+    // The proof that a retry of a pending bootstrap credential may use, set when an unseal
+    // successfully reconstructs the master key.
+    //
+    // It records a keyed digest of each share that opened the barrier, never the share or
+    // the master key itself. A retry must present a share whose digest matches, so it
+    // proves knowledge of a share that belongs to this vault without the value being usable
+    // to decrypt anything. A caller with no share, or the wrong share, produces a different
+    // digest and is refused.
+    bootstrap_share_proof: Arc<RwLock<Option<BootstrapShareProof>>>,
 
     // Test-only fault injection: when set, the next bootstrap credential issuance fails
     // and the flag clears. This exists because the failure it injects is a transient one
@@ -96,6 +109,66 @@ struct EncryptedRootKey {
 
 const INIT_PATH: &str = "sys/init";
 const ROOT_KEY_PATH: &str = "sys/root_key_enc";
+
+/// The proof a retry of a pending bootstrap credential must satisfy.
+///
+/// [`SealService::unseal`] sets this the moment it reconstructs the master key, from the
+/// shares that did so. A retry must present a share whose digest matches one of these, so
+/// it proves knowledge of a share that belongs to *this* vault before the root token is
+/// minted. A caller with no share, or the wrong share, cannot satisfy it.
+///
+/// Only digests are retained — an HMAC-SHA-256 under a random per-process key over the
+/// share's index and bytes — so nothing here is reversible into a share or into the master
+/// key. The key is random per instance and never persisted or logged, and is zeroized on
+/// drop, so the digests are meaningless to anyone who does not hold the running process's
+/// memory.
+struct BootstrapShareProof {
+    key: zeroize::Zeroizing<[u8; 32]>,
+    digests: Vec<[u8; 32]>,
+}
+
+impl BootstrapShareProof {
+    /// Digest the shares that opened the barrier, under a fresh random key.
+    fn from_shares(shares: &[Share]) -> Self {
+        use rand::RngCore;
+        let mut key = [0u8; 32];
+        rand::rngs::OsRng.fill_bytes(&mut key);
+        let key = zeroize::Zeroizing::new(key);
+        let digests = shares
+            .iter()
+            .map(|share| Self::digest(&key, share))
+            .collect();
+        Self { key, digests }
+    }
+
+    fn digest(key: &[u8; 32], share: &Share) -> [u8; 32] {
+        use hmac::{Hmac, Mac};
+        let mut mac =
+            Hmac::<sha2::Sha256>::new_from_slice(key).expect("HMAC accepts a 32-byte key");
+        mac.update(&[share.index]);
+        // `usize` widens to `u64` on every supported target, so this cannot truncate.
+        mac.update(&(share.data.len() as u64).to_be_bytes());
+        mac.update(&share.data);
+        mac.finalize().into_bytes().into()
+    }
+
+    /// Whether `share` is one of the shares that opened the barrier.
+    ///
+    /// Compares against every stored digest without short-circuiting, so the time taken
+    /// does not reveal how many — if any — of a probe's shares are known.
+    fn accepts(&self, share: &Share) -> bool {
+        let candidate = Self::digest(&self.key, share);
+        let mut matched = false;
+        for digest in &self.digests {
+            let mut diff = 0u8;
+            for (a, b) in candidate.iter().zip(digest.iter()) {
+                diff |= a ^ b;
+            }
+            matched |= diff == 0;
+        }
+        matched
+    }
+}
 
 /// The cross-process initialization lease.
 ///
@@ -312,6 +385,7 @@ impl SealService {
             unseal_buffer: Arc::new(RwLock::new(Vec::new())),
             init_lock: tokio::sync::Mutex::new(()),
             bootstrap_pending: Arc::new(AtomicBool::new(false)),
+            bootstrap_share_proof: Arc::new(RwLock::new(None)),
             #[cfg(test)]
             fail_next_bootstrap: Arc::new(AtomicBool::new(false)),
             #[cfg(test)]
@@ -342,8 +416,8 @@ impl SealService {
     }
 
     /// Whether an unseal has opened the barrier but its bootstrap credential has not been
-    /// issued yet — the state from which a retried unseal can recover the credential
-    /// without the shares.
+    /// issued yet — the state from which a retried unseal can recover the credential with
+    /// one of the shares that opened it, rather than the full threshold again.
     ///
     /// The retry is in-process: it holds only while the barrier is still open in this
     /// process. After a restart the root key is gone and the shares are required again.
@@ -1490,40 +1564,42 @@ impl SealService {
         Ok(identity)
     }
 
-    /// Submit a share to unseal
+    /// Submit a share to unseal.
+    ///
+    /// The share is required on every path, including a retry of a pending bootstrap
+    /// credential: the credential is the root token, so issuing it must be earned by
+    /// producing key material that belongs to this vault, not by the presence of an
+    /// in-memory flag.
     pub async fn unseal(&self, share_str: &str) -> Result<UnsealResponse> {
         if !self.is_initialized().await {
             return Err(anyhow!("System not initialized"));
         }
+
+        let share = Self::decode_share(share_str)?;
+
         if !self.is_sealed().await {
             // The barrier is already open. Normally that means there is nothing to do and
             // the status is all the caller needs. But if a previous unseal opened the
             // barrier and then failed to issue the root credential, this call is the
-            // retry: the root key is installed, the root identity was persisted at init,
-            // and neither requires the shares that were already discarded. Answering with
+            // retry: the root identity was persisted at init, so the credential can be
+            // minted without reinitialising or resurrecting the master key. Answering with
             // an empty token here is what left the vault open and unreachable.
+            //
+            // The retry still demands the share. Accepting the flag alone would make
+            // `sys/unseal` — a public route by construction, since it must work while
+            // sealed — mint the most privileged token in the system for any anonymous
+            // caller that happened to hit the window.
             if self.bootstrap_is_pending() {
-                return self.issue_bootstrap_credential().await;
+                return self.issue_bootstrap_credential_for(&share).await;
             }
             return self.get_status().await;
         }
-
-        // Try decoding hex first, then base64
-        let share_bytes = if let Ok(b) = hex::decode(share_str) {
-            b
-        } else {
-            base64::Engine::decode(&base64::engine::general_purpose::STANDARD, share_str)
-                .map_err(|_| anyhow!("Invalid share format (expected hex or base64)"))?
-        };
-
-        let share: Share =
-            serde_json::from_slice(&share_bytes).map_err(|_| anyhow!("Invalid share structure"))?;
 
         let mut buffer = self.unseal_buffer.write().await;
 
         // Add if not exists
         if !buffer.iter().any(|s| s.index == share.index) {
-            buffer.push(share);
+            buffer.push(share.clone());
         }
 
         // Check threshold
@@ -1538,69 +1614,131 @@ impl SealService {
             (config.threshold as usize, config.shares as usize)
         };
 
-        if buffer.len() >= threshold {
-            // Reconstruct
-            tracing::info!("Threshold reached. Attempting to unseal...");
-
-            // Reconstruct Master Key
-            let master_key = match shamir::combine(&buffer) {
-                Ok(k) => k,
-                Err(e) => {
-                    // Wrong shares?
-                    tracing::error!("Failed to combine shares: {}", e);
-                    return Err(anyhow!("Failed to reconstruct key: {}", e));
-                }
-            };
-
-            // Get Encrypted Root Key
-            let entry = self
-                .storage
-                .get_by_path(ROOT_KEY_PATH)
-                .await
-                .map_err(|e| anyhow!("Storage error: {}", e))?
-                .ok_or(anyhow!("Root key missing"))?;
-
-            let enc_root: EncryptedRootKey = serde_json::from_slice(&entry.encrypted_data)
-                .map_err(|_| anyhow!("Invalid root key data"))?;
-
-            // Decrypt Root Key
-            match self.crypto.decrypt_with_key(&master_key, &enc_root.data) {
-                Ok(root_key) => {
-                    // SUCCESS!
-                    self.crypto.set_root_key(root_key).await?;
-                    tracing::info!("Vault unsealed successfully.");
-                    // The shares have done their job and are the one piece of plaintext
-                    // here that must not linger. Dropping the buffer before the credential
-                    // is issued is safe because the credential is derived from the root
-                    // key and the persisted root identity, never from a share.
-                    buffer.clear();
-                    drop(buffer);
-
-                    self.issue_bootstrap_credential_with(threshold, shares_total)
-                        .await
-                }
-                Err(e) => {
-                    tracing::error!(
-                        "Failed to decrypt root key with reconstructed master key. Wrong shares?"
-                    );
-                    Err(anyhow!(
-                        "Failed to decrypt root key. Invalid shares? Error: {}",
-                        e
-                    ))
-                }
-            }
-        } else {
+        if buffer.len() < threshold {
             drop(buffer);
-            self.get_status().await
+            return self.get_status().await;
+        }
+
+        // Threshold reached. The buffer's contents are about to be either consumed into a
+        // proof (success) or discarded (failure), and in both cases must not linger in
+        // memory. Rotate them out of the shared buffer now so no early return below can
+        // skip the cleanup.
+        tracing::info!("Threshold reached. Attempting to unseal...");
+        let submitted: Vec<Share> = std::mem::take(&mut *buffer);
+        drop(buffer);
+
+        // Reconstruct Master Key. A failure here means at least one share is wrong; the
+        // buffer must be emptied rather than left full, or the same share index could never
+        // be corrected — the correct share would find its index occupied and be ignored,
+        // and every later attempt would reuse the bad combination.
+        let master_key = match shamir::combine(&submitted) {
+            Ok(k) => k,
+            Err(e) => {
+                tracing::error!("Failed to combine shares: {}", e);
+                Self::discard_shares(submitted);
+                self.audit_unseal(
+                    LEGACY_ROOT_USERNAME,
+                    false,
+                    "unseal",
+                    "share reconstruction failed; shares discarded, retry with valid shares",
+                )
+                .await;
+                return Err(anyhow!("Failed to reconstruct key: {}", e));
+            }
+        };
+
+        // Get Encrypted Root Key
+        let entry = self
+            .storage
+            .get_by_path(ROOT_KEY_PATH)
+            .await
+            .map_err(|e| anyhow!("Storage error: {}", e))?
+            .ok_or(anyhow!("Root key missing"))?;
+
+        let enc_root: EncryptedRootKey = serde_json::from_slice(&entry.encrypted_data)
+            .map_err(|_| anyhow!("Invalid root key data"))?;
+
+        // Decrypt Root Key
+        match self.crypto.decrypt_with_key(&master_key, &enc_root.data) {
+            Ok(root_key) => {
+                // SUCCESS!
+                self.crypto.set_root_key(root_key).await?;
+                tracing::info!("Vault unsealed successfully.");
+
+                // Record what a retry must prove before the shares are discarded: a digest
+                // of each share that actually opened the barrier. The credential is minted
+                // later, and if that fails the caller retries by re-presenting a share, not
+                // by presenting nothing.
+                *self.bootstrap_share_proof.write().await =
+                    Some(BootstrapShareProof::from_shares(&submitted));
+                Self::discard_shares(submitted);
+
+                self.issue_bootstrap_credential_with(threshold, shares_total)
+                    .await
+            }
+            Err(e) => {
+                tracing::error!(
+                    "Failed to decrypt root key with reconstructed master key. Wrong shares?"
+                );
+                Self::discard_shares(submitted);
+                self.audit_unseal(
+                    LEGACY_ROOT_USERNAME,
+                    false,
+                    "unseal",
+                    "root key did not decrypt with the submitted shares; shares discarded",
+                )
+                .await;
+                Err(anyhow!(
+                    "Failed to decrypt root key. Invalid shares? Error: {}",
+                    e
+                ))
+            }
         }
     }
 
-    /// Issue the root credential for a barrier that is already open, using the identity
-    /// `init` recorded rather than a hard-coded username.
+    /// Decode a share from its wire form: hex or base64 of the serialised [`Share`].
+    fn decode_share(share_str: &str) -> Result<Share> {
+        // Try decoding hex first, then base64
+        let share_bytes = if let Ok(b) = hex::decode(share_str) {
+            b
+        } else {
+            base64::Engine::decode(&base64::engine::general_purpose::STANDARD, share_str)
+                .map_err(|_| anyhow!("Invalid share format (expected hex or base64)"))?
+        };
+        serde_json::from_slice(&share_bytes).map_err(|_| anyhow!("Invalid share structure"))
+    }
+
+    /// Zeroize and drop a set of shares that has done its job or proved wrong.
+    fn discard_shares(mut shares: Vec<Share>) {
+        use zeroize::Zeroize;
+        for share in &mut shares {
+            share.data.zeroize();
+        }
+    }
+
+    /// The retry path for a pending bootstrap credential. The caller must present a share
+    /// that opened this vault's barrier; the flag alone is not enough.
     ///
-    /// Split for the retry path, which knows neither the threshold nor the share count
-    /// because the shares are long gone.
-    async fn issue_bootstrap_credential(&self) -> Result<UnsealResponse> {
+    /// A refusal is audited, because `sys/unseal` is public and an unauthenticated attempt
+    /// to obtain the root token is exactly the event a reviewer needs after the fact.
+    async fn issue_bootstrap_credential_for(&self, share: &Share) -> Result<UnsealResponse> {
+        // Error message deliberately says only that the barrier is open: an anonymous
+        // caller must not learn whether their share matched, only that they received no
+        // credential. The audit record carries the detail.
+        let refused = "Vault is already unsealed; no credential is owed. To rotate the root credential, seal and unseal again.";
+        let proof = self.bootstrap_share_proof.read().await;
+        let accepted = proof.as_ref().is_some_and(|p| p.accepts(share));
+        drop(proof);
+        if !accepted {
+            self.audit_unseal(
+                LEGACY_ROOT_USERNAME,
+                false,
+                "unseal",
+                "rejected a pending-bootstrap retry that did not present a share of this vault",
+            )
+            .await;
+            return Err(anyhow!(refused));
+        }
         let (threshold, shares_total) = self.init_shape().await;
         self.issue_bootstrap_credential_with(threshold, shares_total)
             .await
@@ -1609,8 +1747,10 @@ impl SealService {
     /// Mint the root token and record the session it is bound to.
     ///
     /// Failure here leaves the barrier open with [`Self::bootstrap_is_pending`] set, which
-    /// is the recoverable state: a later unseal call reaches [`Self::issue_bootstrap_credential`]
-    /// and mints the credential without reinitialising the vault or re-presenting shares.
+    /// is the recoverable state: a later unseal call reaches
+    /// [`Self::issue_bootstrap_credential_for`], whose caller must re-present a share of
+    /// this vault, and mints the credential without reinitialising the vault or
+    /// re-presenting the full threshold.
     async fn issue_bootstrap_credential_with(
         &self,
         threshold: usize,
@@ -1658,9 +1798,11 @@ impl SealService {
                 .await;
                 Err(anyhow!(
                     "Vault is unsealed but the root credential could not be issued ({e}). \
-                     Retry unseal while this process is still running; the barrier is open \
-                     in memory and no shares are needed. A restart discards the in-memory \
-                     root key, so after one the vault must be unsealed again with its shares."
+                     Retry unseal while this process is still running, presenting one of \
+                     the shares that opened the vault; the barrier stays open in memory, \
+                     so the full threshold is not needed again. A restart discards the \
+                     in-memory root key, so after one the vault must be unsealed again \
+                     with its shares."
                 ))
             }
         }
@@ -1741,9 +1883,10 @@ impl SealService {
         self.crypto.clear_root_key().await;
         self.unseal_buffer.write().await.clear();
         // Sealing discards the root key, so a credential that was never issued cannot be
-        // issued from this state either. Clearing the flag keeps the two in step: after a
-        // seal, an unseal must go through the shares again.
+        // issued from this state either. Clearing the flag and the share proof keeps the
+        // two in step: after a seal, an unseal must go through the shares again.
         self.bootstrap_pending.store(false, Ordering::SeqCst);
+        *self.bootstrap_share_proof.write().await = None;
         tracing::info!("Vault sealed.");
     }
 }
@@ -2054,9 +2197,14 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn a_failed_bootstrap_credential_is_recoverable_without_reinitialising() {
-        // Regression: if `issue_session_token` failed after the barrier opened and the
-        // shares were cleared, the vault was open and unreachable, with no retry path.
+    async fn a_failed_bootstrap_credential_is_recoverable_only_with_a_share_that_opened_the_vault()
+    {
+        // Two regressions, one property. If `issue_session_token` failed after the barrier
+        // opened and the shares were cleared, the vault was open and unreachable with no
+        // retry path. The first fix let any caller retry with no share at all — which
+        // turned the public `sys/unseal` route into a way to mint the root token from the
+        // mere presence of the in-memory flag. The retry must both exist and require a
+        // share that belongs to this vault.
         let _env = crate::test_support::without_root_key();
         let vault = sealed_vault().await;
 
@@ -2082,12 +2230,40 @@ mod tests {
         assert!(!vault.seal.is_sealed().await);
         assert!(vault.seal.bootstrap_is_pending());
 
-        // Retry without reinitialising and without presenting shares again.
+        // A retry must prove it holds a share of this vault. A caller with none is refused
+        // and receives no credential; the request names nothing about whether the barrier
+        // is open beyond a generic refusal.
+        let without_a_share = vault.seal.unseal("not-a-share").await;
+        assert!(
+            without_a_share.is_err(),
+            "a pending retry with no valid share must not receive a credential"
+        );
+        assert!(
+            vault.seal.bootstrap_is_pending(),
+            "a refused retry must leave the credential still owed"
+        );
+
+        // A wrong-but-well-formed share is refused too: the proof is over the shares that
+        // opened this vault, not over the ability to serialise a share. This share is from
+        // a *different* vault, so it is real and well-formed but cannot open this barrier.
+        let other_vault = sealed_vault().await;
+        let other_init = other_vault
+            .seal
+            .init(2, 2, "other-root", &other_vault.auth, &other_vault.mfa)
+            .await
+            .expect("second vault init");
+        assert!(
+            vault.seal.unseal(&other_init.keys[0]).await.is_err(),
+            "a share from a different vault must not satisfy the retry"
+        );
+
+        // Retry by re-presenting one of the shares that opened the barrier — not the full
+        // threshold again.
         let retried = vault
             .seal
-            .unseal("ignored-because-the-barrier-is-open")
+            .unseal(&init.keys[0])
             .await
-            .expect("a retry must recover the credential");
+            .expect("a retry with a share that opened the vault must recover the credential");
         let token = retried.root_token.expect("root credential on retry");
         let user = vault
             .auth
@@ -2102,10 +2278,10 @@ mod tests {
         );
 
         // Fault injection is single-shot, so the vault is healthy: a further call while
-        // the barrier is open returns plain status and mints nothing new.
+        // the barrier is open, with a valid share, returns plain status and mints nothing.
         let afterwards = vault
             .seal
-            .unseal("still-open")
+            .unseal(&init.keys[0])
             .await
             .expect("the vault keeps operating");
         assert!(!afterwards.sealed);
@@ -2253,6 +2429,118 @@ mod tests {
             "a sealed vault owes no credential"
         );
         assert!(vault.crypto.encrypt_data(b"test").await.is_err());
+    }
+
+    #[tokio::test]
+    async fn a_failed_reconstruction_clears_the_buffer_so_correct_shares_can_be_submitted() {
+        // Regression: when `shamir::combine` or the root-key decryption failed, the share
+        // buffer was left exactly as it was. A wrong share whose index happened to match a
+        // correct one could then never be replaced — the correct share found its index
+        // occupied and was ignored — so the vault stayed permanently unopenable without a
+        // restart, even though the operator was holding the right shares.
+        //
+        // The property: a wrong share that reaches the threshold is discarded, and the
+        // correct shares unseal the vault immediately afterwards, in the same process.
+        let _env = crate::test_support::without_root_key();
+        let vault = sealed_vault().await;
+
+        let init = vault
+            .seal
+            .init(3, 2, "retry-root", &vault.auth, &vault.mfa)
+            .await
+            .expect("init");
+
+        // A well-formed share from a different vault: it decodes and contributes to a
+        // combination, but cannot open this vault's root key.
+        let foreign_vault = sealed_vault().await;
+        let foreign = foreign_vault
+            .seal
+            .init(
+                3,
+                2,
+                "foreign-root",
+                &foreign_vault.auth,
+                &foreign_vault.mfa,
+            )
+            .await
+            .expect("foreign init");
+
+        vault
+            .seal
+            .unseal(&foreign.keys[0])
+            .await
+            .expect("the foreign share is well-formed");
+        let failed = vault.seal.unseal(&init.keys[1]).await;
+        assert!(
+            failed.is_err(),
+            "two shares that do not open this vault must fail, not unseal it"
+        );
+        assert!(
+            vault.seal.is_sealed().await,
+            "a failed reconstruction must leave the barrier sealed"
+        );
+
+        // The buffer must have been emptied by the failure, or the share with this index
+        // could not be replaced. Submit the two correct shares and expect success.
+        vault.seal.unseal(&init.keys[0]).await.expect("share one");
+        let complete = vault
+            .seal
+            .unseal(&init.keys[1])
+            .await
+            .expect("the correct shares must unseal the vault without a restart");
+        assert!(!complete.sealed);
+        assert!(
+            complete.root_token.is_some(),
+            "a successful unseal must hand back the root credential"
+        );
+    }
+
+    #[tokio::test]
+    async fn a_rejected_share_combination_is_audited() {
+        // The failure path discards key material, so it must be recorded; a reviewer
+        // reading the audit log needs to know that a threshold of shares was presented and
+        // rejected.
+        let _env = crate::test_support::without_root_key();
+        let vault = sealed_vault().await;
+
+        let init = vault
+            .seal
+            .init(2, 2, "audit-root", &vault.auth, &vault.mfa)
+            .await
+            .expect("init");
+        let foreign_vault = sealed_vault().await;
+        let foreign = foreign_vault
+            .seal
+            .init(
+                2,
+                2,
+                "audit-foreign",
+                &foreign_vault.auth,
+                &foreign_vault.mfa,
+            )
+            .await
+            .expect("foreign init");
+
+        vault
+            .seal
+            .unseal(&foreign.keys[0])
+            .await
+            .expect("share one");
+        assert!(vault.seal.unseal(&init.keys[1]).await.is_err());
+
+        let events = vault
+            .audit
+            .get_entries(crate::services::audit::AuditFilters::default())
+            .await
+            .expect("audit entries");
+        assert!(
+            events.iter().any(|e| !e.entry.success),
+            "a rejected share combination must produce a failed seal audit event: {:?}",
+            events
+                .iter()
+                .map(|e| (&e.original_user, e.entry.success))
+                .collect::<Vec<_>>()
+        );
     }
 
     #[tokio::test]

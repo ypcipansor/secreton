@@ -116,9 +116,10 @@ Store the shares and the root token somewhere safe — the shares are the only w
 after a restart. The root token is a bootstrap credential: it expires one hour after it is
 issued, and is deliberately not tied to the configurable session timeout. If issuing it
 fails after the barrier has already opened, repeat the unseal call while the process is
-still running — the barrier stays open in memory and no shares are needed to retry. That
-retry does not survive a restart: restarting discards the in-memory root key, so the vault
-must be unsealed again with its shares.
+still running, presenting one of the shares that opened the barrier: `sys/unseal` is a
+public route, so the retry proves share ownership rather than reissuing the token to anyone
+who asks. That retry does not survive a restart: restarting discards the in-memory root
+key, so the vault must be unsealed again with a quorum of shares.
 
 A failed `init` is safe to retry. The steps are staged under `sys/init_staging`, written
 before the first durable artifact and cleared last; until the marker is gone the vault is
@@ -220,7 +221,7 @@ part of the Rust build. `cargo leptos serve` in one terminal, then:
 ```bash
 npm ci                          # installs the pinned playwright-core
 npm run browser:install         # once, fetches the matching Chromium
-npm run screenshots
+SCREENSHOT_USER=someone SCREENSHOT_PASSWORD=... npm run screenshots
 ```
 
 If you already have a Chromium, skip `browser:install` and set
@@ -228,8 +229,10 @@ If you already have a Chromium, skip `browser:install` and set
 capturing.
 
 It signs in through the real form — the session lives in an `HttpOnly` cookie, so driving
-the form is the only way in — captures every view into `docs/screenshots/`, and exits
-non-zero if any view is blank, errored, overflowing, or logs an unexpected console error.
+the form is the only way in — so it needs the account's password in `SCREENSHOT_PASSWORD`;
+the script refuses to start without it rather than falling back to a committed default. It
+captures every view into `docs/screenshots/`, and exits non-zero if any view is blank,
+errored, overflowing, or logs an unexpected console error.
 
 [`AGENTS.md`](AGENTS.md) is the working reference: layout, commands, the invariants that
 review enforces, and how to add an endpoint, a page or a storage backend. It applies to

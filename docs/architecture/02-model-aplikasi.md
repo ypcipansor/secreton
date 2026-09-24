@@ -246,9 +246,10 @@ membacanya. Klien programatik (CLI, agent, layanan lain) memakai
 | RSA | **Tidak ada kunci RSA yang dibuat atau diterima** |
 
 Root key hasil rekonstruksi hanya hidup di memori. Jika penerbitan token root gagal setelah
-barrier terbuka, `unseal` dapat diulang tanpa share selama proses belum restart; setelah
-restart, root key hilang dan share diperlukan kembali
-(`crates/engines/src/services/seal.rs`).
+barrier terbuka, ulangi panggilan `unseal` dengan share yang benar: retry hanya menerbitkan
+kredensial bila membuktikan kepemilikan share — `sys/unseal` adalah route publik, jadi flag
+"pending" saja tidak boleh pernah cukup. Setelah restart, root key hilang dan vault harus
+di-unseal kembali dengan share-nya (`crates/engines/src/services/seal.rs`).
 
 `init` juga bertahap: state parsial di bawah `sys/init_staging` membuat vault tetap
 terlihat belum terinisialisasi sampai semua artefak init tersimpan, dan kegagalan di
@@ -262,9 +263,15 @@ tersebut, bukan diserahkan ke handler: hanya dokumen HTML yang membawa nonce mil
 (yang dikembalikan lewat header internal) yang mendapat policy bernonce; respons lain
 ditimpa dengan `csp_without_nonce()` sehingga handler tidak dapat melemahkan policy.
 Directive `frame-ancestors`, `object-src`, `base-uri`, dan `form-action` selalu ada.
-Middleware juga menyelesaikan skema efektif permintaan berdasarkan koneksi dan jumlah proxy
-tepercaya (`http.trusted_proxies`), lalu menerbitkannya sebagai `ResolvedScheme`; keputusan
-HSTS dan atribut `Secure` cookie membaca hasil yang sama.
+Middleware juga menyelesaikan skema efektif permintaan dan menerbitkannya sebagai
+`ResolvedScheme`; keputusan HSTS dan atribut `Secure` cookie membaca hasil yang sama.
+Skema tidak pernah dibaca dari URI permintaan: `request.uri().scheme_str()` kosong untuk
+request HTTP/1.1 origin-form (setiap request browser), sehingga koneksi TLS langsung akan
+dinilai sebagai HTTP polos dan kehilangan `Secure` serta HSTS, sementara pada HTTP/2 skema
+itu pseudo-header `:scheme` yang dapat dipalsukan klien. Operator mendeklarasikan listener
+TLS-nya lewat `http.https_only`; selain itu hanya `X-Forwarded-Proto` dari proxy tepercaya
+(`http.trusted_proxies`) yang dipertimbangkan, sehingga header palsu dari klien langsung
+tidak menyalakan apa pun.
 
 ### 5.5 Audit
 

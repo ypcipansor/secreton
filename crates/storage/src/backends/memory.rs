@@ -469,6 +469,37 @@ mod tests {
         assert!(backend.exists("kv/app/db").await.unwrap());
     }
 
+    /// Regression: a rewrite under a fresh id must supersede the old one completely. If the
+    /// stale id were left in the index, `get_by_id(old_id)` would resolve through the still
+    /// mapped path to the *replacement* record, and `delete_by_id(old_id)` would delete the
+    /// record that replaced it rather than reporting it absent.
+    #[tokio::test]
+    async fn a_rewrite_under_a_new_id_retires_the_old_id() {
+        let backend = MemoryBackend::new();
+        let mut first = entry("kv/app/rewritten");
+        first.id = Uuid::new_v4();
+        backend.store(&first).await.unwrap();
+
+        let mut second = entry("kv/app/rewritten");
+        second.id = Uuid::new_v4();
+        backend.store(&second).await.unwrap();
+
+        assert!(
+            backend.get_by_id(first.id).await.unwrap().is_none(),
+            "the superseded id must not resolve"
+        );
+        assert!(
+            !backend.delete_by_id(first.id).await.unwrap(),
+            "deleting the superseded id must report nothing removed, not remove its replacement"
+        );
+        let survivor = backend
+            .get_by_id(second.id)
+            .await
+            .unwrap()
+            .expect("the replacement must survive");
+        assert_eq!(survivor.id, second.id);
+    }
+
     #[tokio::test]
     async fn committed_transaction_writes_are_visible() {
         let backend = MemoryBackend::new();

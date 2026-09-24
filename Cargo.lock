@@ -4749,6 +4749,7 @@ dependencies = [
  "sha3",
  "ssh-key",
  "sysinfo",
+ "tempfile",
  "thiserror 2.0.19",
  "time",
  "tokio",

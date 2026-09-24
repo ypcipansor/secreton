@@ -20,7 +20,7 @@
 //   BASE_URL            default http://127.0.0.1:3000
 //   CHROMIUM_PATH       browser binary; default is the one Playwright installed
 //   SCREENSHOT_USER     demo account username (default "demo")
-//   SCREENSHOT_PASSWORD demo account password (required if the login views are captured)
+//   SCREENSHOT_PASSWORD password for that account (required; the capture signs in for real)
 
 import { createRequire } from "node:module";
 import fs from "node:fs";
@@ -33,9 +33,28 @@ const REPO = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const OUT = path.join(REPO, "docs/screenshots");
 const BASE = process.env.BASE_URL ?? "http://127.0.0.1:3000";
 const USER = process.env.SCREENSHOT_USER ?? "demo";
-const PASSWORD = process.env.SCREENSHOT_PASSWORD ?? "change-me-please";
+const PASSWORD = process.env.SCREENSHOT_PASSWORD;
 const DESKTOP = { width: 1280, height: 800 };
 const MOBILE = { width: 390, height: 844 };
+
+// Every run signs in for real — the session lives in an `HttpOnly` cookie, so driving the
+// form is the only way to reach the authenticated views. A default password would either
+// be a credential in the repository or a plausible-looking value that silently produces a
+// signed-out capture of the whole authenticated set. Refuse to start without one.
+if (!PASSWORD) {
+  console.error(
+    [
+      "SCREENSHOT_PASSWORD is not set.",
+      "",
+      "The capture signs in with a real account, so it needs the password for",
+      `SCREENSHOT_USER (currently ${JSON.stringify(USER)}).`,
+      "",
+      "Set both variables and re-run:",
+      "  SCREENSHOT_USER=someone SCREENSHOT_PASSWORD=... npm run screenshots",
+    ].join("\n")
+  );
+  process.exit(4);
+}
 
 let chromium;
 try {

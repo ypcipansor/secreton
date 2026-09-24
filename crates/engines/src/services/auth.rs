@@ -31,6 +31,15 @@ const SESSION_STORAGE_PREFIX: &str = "sys/auth/sessions/";
 /// are cleaned up via `delete_expired`.
 const REVOKED_TOKEN_STORAGE_PREFIX: &str = "sys/auth/revoked-tokens/";
 
+/// Storage prefix for refresh-token *reservations*: the single-use slot claimed before a
+/// refresh exchange does its fallible work, and converted into a permanent revocation once
+/// a new session exists.
+///
+/// Keyed, like [`REVOKED_TOKEN_STORAGE_PREFIX`], by the SHA-256 hash of the token, so no
+/// token material is written. It is a distinct path from the revocation entry because the
+/// two states are different: a reservation can still be released, a revocation cannot.
+const REFRESH_RESERVATION_STORAGE_PREFIX: &str = "sys/auth/refresh-reservations/";
+
 /// How long a bootstrap credential stays valid: the token an unseal hands back, and the
 /// session record behind it.
 ///
@@ -1321,27 +1330,30 @@ impl AuthenticationService {
 
         // Reserve the single-use slot atomically, before the fallible work below.
         //
-        // This is the authority for reuse detection: two concurrent requests for the same
-        // refresh token both pass the fast-path check, but only the first to take the write
-        // lock finds the slot empty and inserts; the second observes the entry and is
-        // rejected. The reservation is in-memory only at this point — the durable
-        // revocation is written by [`Self::commit_refresh_token_rotation`] *after* the new
-        // session is stored. Writing the revocation here instead, as this used to, meant a
-        // later failure (a storage hiccup loading the user, an MFA service error, a failed
-        // session write) returned an error while the old token was already blacklisted: the
-        // caller held no new token and could never retry with the old one, so a transient
-        // fault permanently logged them out. A failure that issues no session now releases
-        // the reservation instead of consuming it.
+        // This is the authority for reuse detection. The in-memory check-and-insert was
+        // sufficient for one process, but two replicas sharing a backend each have their own
+        // map: both pass the fast-path check and both believe they won, so the same refresh
+        // token was exchanged twice and two token pairs were issued. The reservation is
+        // therefore taken in the *shared* backend first, as an insert-if-absent write at a
+        // path derived from the token's hash, and only a caller that actually created the
+        // record may proceed. The in-memory map is kept as a fast path for this process.
+        //
+        // A reservation is not a revocation: it is released if the exchange ends without a
+        // new session (see `release_refresh_token_reservation`), and only a completed
+        // exchange commits the permanent revocation. Writing the revocation here instead, as
+        // this used to, meant a later failure (a storage hiccup loading the user, an MFA
+        // service error, a failed session write) returned an error while the old token was
+        // already blacklisted: the caller held no new token and could never retry with the
+        // old one, so a transient fault permanently logged them out.
         let refresh_expiry = chrono::Utc::now() + chrono::Duration::days(8);
-        {
-            let mut blacklist = self.token_blacklist.write().await;
-            if let Some(expires_at) = blacklist.get(refresh_token)
-                && *expires_at > chrono::Utc::now()
-            {
-                return Err(AuthError::InvalidToken);
-            }
-            blacklist.insert(refresh_token.to_string(), refresh_expiry);
-        }
+        let Some(reservation_owner) = self
+            .reserve_refresh_token(refresh_token, refresh_expiry)
+            .await?
+        else {
+            // Another caller — in this process or another replica sharing the backend —
+            // holds the single-use slot, so this must not exchange the token again.
+            return Err(AuthError::InvalidToken);
+        };
 
         // Everything from here can fail for a non-security reason: reading the user,
         // verifying MFA, minting the pair, persisting the new session. The reservation above
@@ -1582,7 +1594,8 @@ impl AuthenticationService {
                 // written, then return the original error. A retry with the same refresh
                 // token succeeds if the fault was transient; a genuine reuse still fails,
                 // because a successful rotation would have committed the revocation.
-                self.release_refresh_token_reservation(refresh_token).await;
+                self.release_refresh_token_reservation(refresh_token, &reservation_owner)
+                    .await;
                 Err(e)
             }
         }
@@ -1597,6 +1610,14 @@ impl AuthenticationService {
     ) {
         self.revoke_token(refresh_token.to_string(), refresh_expiry)
             .await;
+
+        // The reservation is deliberately *not* removed here. Deleting it on success would
+        // reopen the very window this fix closes: a second replica whose claim attempt
+        // arrives after the delete but before it has observed the revocation would win the
+        // insert-if-absent race and exchange the token again. Leaving the reservation in
+        // place keeps the slot occupied for the token's whole lifetime, so the shared
+        // backend refuses every later claim; it expires with the token, exactly as the
+        // revocation entry does.
 
         // Best-effort: find and delete the old session whose refresh_token
         // matches the one being exchanged.  This is a scan over the
@@ -1657,19 +1678,111 @@ impl AuthenticationService {
         }
     }
 
-    /// Drop the in-memory single-use reservation for a refresh token whose exchange failed.
+    /// The storage path of the reservation slot for a refresh token.
+    ///
+    /// Derived from the SHA-256 hash of the token, exactly like
+    /// [`Self::revoked_token_path`], so the reservation is content-addressed and no token
+    /// material reaches storage. It is deliberately a different prefix from the revocation
+    /// path: the two records mean different things and are removed by different code.
+    fn refresh_reservation_path(token: &str) -> String {
+        use sha2::{Digest, Sha256};
+        let mut hasher = Sha256::new();
+        hasher.update(token.as_bytes());
+        let digest = hasher.finalize();
+        format!(
+            "{}{}",
+            REFRESH_RESERVATION_STORAGE_PREFIX,
+            hex::encode(digest)
+        )
+    }
+
+    /// Claim the single-use reservation for a refresh token, in shared storage.
+    ///
+    /// Returns the reservation's owner token when *this* call created it and may proceed,
+    /// or `None` when another holder (in this process or another replica) already has it and
+    /// the caller must be refused. On a backend that reports
+    /// [`secreton_storage::Coordination::SingleProcess`] the atomic insert is not
+    /// available, so the in-process blacklist is the reservation — the same guarantee the
+    /// service already had, and the honest one for a backend no second replica can share.
+    ///
+    /// The reservation carries the refresh token's expiry so `delete_expired` reclaims it;
+    /// without that, a reservation left by a failed exchange would block the token forever.
+    async fn reserve_refresh_token(
+        &self,
+        refresh_token: &str,
+        refresh_expiry: chrono::DateTime<chrono::Utc>,
+    ) -> Result<Option<String>, AuthError> {
+        // In-memory fast path and single-process authority. Check and insert under one
+        // write guard, so two tasks on this instance cannot both win.
+        {
+            let mut blacklist = self.token_blacklist.write().await;
+            if let Some(expires_at) = blacklist.get(refresh_token)
+                && *expires_at > chrono::Utc::now()
+            {
+                return Ok(None);
+            }
+            blacklist.insert(refresh_token.to_string(), refresh_expiry);
+        }
+
+        // The owner token is unique to this claim, so a release can never remove a
+        // reservation another attempt re-took after this one's record expired.
+        let owner = Uuid::new_v4().to_string();
+
+        if self.storage.coordination() == secreton_storage::Coordination::SingleProcess {
+            // A process-local backend is a separate map per process, so no second replica
+            // can hold this token. The in-memory reservation above is the complete
+            // guarantee, and pretending to take a durable one would be the fake lock the
+            // storage trait refuses to fake.
+            return Ok(Some(owner));
+        }
+
+        let path = Self::refresh_reservation_path(refresh_token);
+        let entry = SecretEntry::new(
+            path,
+            Vec::new(),
+            EncryptionMetadata::default(),
+            SecurityLevel::Internal,
+            Uuid::nil(),
+        )
+        .owned_by(&owner)
+        .with_expiration(refresh_expiry);
+
+        // Insert-if-absent is the atomic claim. A backend that reports cross-process
+        // coordination but cannot perform it returns `Unsupported`, and this fails closed:
+        // refusing the refresh is correct, silently falling back to a per-process check
+        // would reopen the race.
+        match self
+            .storage
+            .compare_and_set(&entry, secreton_storage::Expect::Absent)
+            .await
+        {
+            Ok(true) => Ok(Some(owner)),
+            Ok(false) => {
+                // Another replica already holds it. Drop the in-memory slot this call just
+                // inserted so this process does not carry a reservation it did not win.
+                let mut blacklist = self.token_blacklist.write().await;
+                blacklist.remove(refresh_token);
+                Ok(None)
+            }
+            Err(e) => Err(AuthError::Storage(e)),
+        }
+    }
+
+    /// Drop the single-use reservation for a refresh token whose exchange failed.
     ///
     /// Only called when the exchange issued no session; a completed rotation never releases.
-    /// The durable shadow is deleted too, in case a racing attempt's `revoke_token` wrote one
-    /// between this attempt's reservation and its failure — leaving it would revoke a token
-    /// this attempt never successfully exchanged.
-    async fn release_refresh_token_reservation(&self, refresh_token: &str) {
+    /// Both the in-memory slot and the durable reservation are removed — the latter through
+    /// the owner-conditional delete, so a reservation another attempt re-took after this
+    /// one's record expired is not destroyed. A durable revocation a racing attempt may have
+    /// written for this token is left in place: that is a completed rotation by someone
+    /// else, and releasing it would revive a token that was successfully exchanged.
+    async fn release_refresh_token_reservation(&self, refresh_token: &str, owner: &str) {
         {
             let mut blacklist = self.token_blacklist.write().await;
             blacklist.remove(refresh_token);
         }
-        let path = Self::revoked_token_path(refresh_token);
-        let _ = self.storage.delete_by_path(&path).await;
+        let path = Self::refresh_reservation_path(refresh_token);
+        let _ = self.storage.delete_owned(&path, owner).await;
     }
 
     /// Register a new user
@@ -3056,14 +3169,132 @@ mod tests {
         }
     }
 
+    /// A backend that wraps another and holds the first two `compare_and_set` calls at the
+    /// refresh-reservation path until *both* have arrived.
+    ///
+    /// Without the rendezvous the race in this area is not deterministic: the first
+    /// replica can finish its whole exchange — including the durable revocation — before
+    /// the second even reads the token, so the second is rejected by the revocation rather
+    /// than by the reservation, and the test passes whether or not the reservation is
+    /// authoritative. Parking both attempts at the claim point forces the interleaving the
+    /// property is about: both have passed the fast-path check, and only the shared
+    /// insert-if-absent can decide the winner.
+    #[derive(Debug)]
+    struct ReservationRendezvousBackend {
+        inner: secreton_storage::FileBackend,
+        arrived: tokio::sync::Barrier,
+    }
+
+    impl ReservationRendezvousBackend {
+        fn new(inner: secreton_storage::FileBackend) -> Self {
+            Self {
+                inner,
+                arrived: tokio::sync::Barrier::new(2),
+            }
+        }
+    }
+
+    #[async_trait::async_trait]
+    impl StorageBackend for ReservationRendezvousBackend {
+        async fn store(&self, entry: &SecretEntry) -> StorageResult<()> {
+            self.inner.store(entry).await
+        }
+        async fn get_by_id(&self, id: Uuid) -> StorageResult<Option<SecretEntry>> {
+            self.inner.get_by_id(id).await
+        }
+        async fn get_by_path(&self, path: &str) -> StorageResult<Option<SecretEntry>> {
+            self.inner.get_by_path(path).await
+        }
+        async fn update(&self, entry: &SecretEntry) -> StorageResult<()> {
+            self.inner.update(entry).await
+        }
+        async fn upsert(&self, entry: &SecretEntry) -> StorageResult<()> {
+            self.inner.upsert(entry).await
+        }
+        async fn delete_by_id(&self, id: Uuid) -> StorageResult<bool> {
+            self.inner.delete_by_id(id).await
+        }
+        async fn delete_by_path(&self, path: &str) -> StorageResult<bool> {
+            self.inner.delete_by_path(path).await
+        }
+        async fn compare_and_set(
+            &self,
+            entry: &SecretEntry,
+            expect: secreton_storage::Expect<'_>,
+        ) -> StorageResult<bool> {
+            if entry.path.starts_with(REFRESH_RESERVATION_STORAGE_PREFIX)
+                && expect == secreton_storage::Expect::Absent
+            {
+                self.arrived.wait().await;
+            }
+            self.inner.compare_and_set(entry, expect).await
+        }
+        async fn delete_owned(&self, path: &str, token: &str) -> StorageResult<bool> {
+            self.inner.delete_owned(path, token).await
+        }
+        async fn list(&self, params: &QueryParams) -> StorageResult<Vec<SecretEntry>> {
+            self.inner.list(params).await
+        }
+        async fn count(&self, params: &QueryParams) -> StorageResult<u64> {
+            self.inner.count(params).await
+        }
+        async fn exists(&self, path: &str) -> StorageResult<bool> {
+            self.inner.exists(path).await
+        }
+        async fn begin_transaction(
+            &self,
+        ) -> StorageResult<Box<dyn secreton_storage::StorageTransaction>> {
+            self.inner.begin_transaction().await
+        }
+        async fn store_oauth_state(
+            &self,
+            state: &secreton_domain::OAuthState,
+        ) -> StorageResult<()> {
+            self.inner.store_oauth_state(state).await
+        }
+        async fn get_oauth_state(
+            &self,
+            state: &str,
+        ) -> StorageResult<Option<secreton_domain::OAuthState>> {
+            self.inner.get_oauth_state(state).await
+        }
+        async fn delete_expired_oauth_states(&self) -> StorageResult<u64> {
+            self.inner.delete_expired_oauth_states().await
+        }
+        fn coordination(&self) -> secreton_storage::Coordination {
+            self.inner.coordination()
+        }
+        async fn health_check(&self) -> StorageResult<secreton_storage::HealthStatus> {
+            self.inner.health_check().await
+        }
+        async fn get_stats(&self) -> StorageResult<secreton_storage::StorageStats> {
+            self.inner.get_stats().await
+        }
+        async fn migrate(&self) -> StorageResult<()> {
+            self.inner.migrate().await
+        }
+    }
+
     /// A service over a caller-supplied backend, with the root key installed so record
     /// encryption works — the same graph [`auth_with_open_barrier`] builds.
     async fn auth_with_storage(
         storage: Arc<dyn StorageBackend + Send + Sync>,
     ) -> Arc<AuthenticationService> {
-        let crypto = Arc::new(CryptoService::new(storage.clone()).await.unwrap());
         let root_key = secreton_crypto::generate_key(secreton_crypto::AlgorithmId::Aes256Gcm)
             .expect("root key");
+        auth_with_storage_and_root_key(storage, root_key).await
+    }
+
+    /// The same graph, with a caller-supplied root key.
+    ///
+    /// Two service instances that share a backend must share the key that encrypts the
+    /// system's own records, or one cannot read what the other wrote. A caller that wants
+    /// two cooperating replicas uses this and passes the one key to both.
+    async fn auth_with_storage_and_root_key(
+        storage: Arc<dyn StorageBackend + Send + Sync>,
+        root_key: Vec<u8>,
+    ) -> Arc<AuthenticationService> {
+        let crypto = Arc::new(CryptoService::new(storage.clone()).await.unwrap());
         crypto
             .set_root_key(root_key)
             .await
@@ -3170,6 +3401,98 @@ mod tests {
         assert!(
             replay.is_err(),
             "a refresh token exchanged successfully must not be replayable"
+        );
+    }
+
+    #[tokio::test]
+    async fn two_instances_sharing_a_backend_admit_exactly_one_refresh_exchange() {
+        // Regression (CWE-362): the single-use refresh reservation lived only in the
+        // in-memory `token_blacklist`. Two replicas sharing PostgreSQL, Redis or a file
+        // directory each have their own map, so both passed the check and both inserted,
+        // and the same refresh token was exchanged twice, issuing two token pairs.
+        //
+        // The property: with the reservation taken in the backend the two replicas share,
+        // exactly one exchange succeeds and the other observes "already used".
+        let _env = crate::test_support::without_root_key();
+
+        // A file backend reports `Coordination::CrossProcess` and really implements
+        // `compare_and_set`, so the reservation is arbitrated between the two service
+        // instances exactly as it would be between two server processes. The wrapper parks
+        // both claim attempts at the reservation point, so the race is forced rather than
+        // hoped for — otherwise the first replica can finish its whole exchange (including
+        // the durable revocation) before the second reads the token, and the test would pass
+        // even without the shared reservation.
+        let dir = tempfile::tempdir().expect("tempdir");
+        let file_storage =
+            secreton_storage::FileBackend::new(dir.path().to_str().expect("utf-8 path"))
+                .expect("file backend");
+        let storage: Arc<dyn StorageBackend + Send + Sync> =
+            Arc::new(ReservationRendezvousBackend::new(file_storage));
+        assert_eq!(
+            storage.coordination(),
+            secreton_storage::Coordination::CrossProcess,
+            "this test is only meaningful on a backend that arbitrates across instances"
+        );
+
+        // Two independent service graphs — two "replicas" — over the one backend, sharing
+        // the root key that encrypts the system's own records. Sharing the key is what a
+        // real multi-replica deployment does (all replicas unseal with the same vault), and
+        // it is what lets either read the user the other registered.
+        let shared_root_key =
+            secreton_crypto::generate_key(secreton_crypto::AlgorithmId::Aes256Gcm)
+                .expect("root key");
+        let replica_a =
+            auth_with_storage_and_root_key(storage.clone(), shared_root_key.clone()).await;
+        let replica_b = auth_with_storage_and_root_key(storage.clone(), shared_root_key).await;
+
+        let password = crate::test_support::generated_password();
+        replica_a
+            .register_user(
+                "shared-user",
+                &password,
+                None,
+                vec!["user".to_string()],
+                vec![],
+            )
+            .await
+            .expect("register user");
+
+        // Sign in through replica A, which registered the account. The point of this test
+        // is the reservation race, not cross-replica login caching.
+        let login = replica_a
+            .login(
+                ApiLoginRequest {
+                    username: "shared-user".to_string(),
+                    password,
+                    mfa_code: None,
+                },
+                "192.0.2.1".to_string(),
+                "test".to_string(),
+            )
+            .await
+            .expect("login");
+        let refresh = login.token.refresh_token.clone();
+
+        // Both replicas claim the reservation for the same refresh token at once. The claim
+        // is the single-use gate; asserting on it directly — rather than on the whole
+        // exchange — is what makes this test falsifiable. Reverting the shared reservation
+        // to the per-process map does not make two *exchanges* both succeed here, because a
+        // second defense (the session-binding check that follows the rotation) would still
+        // reject the loser; it makes two *claims* both succeed, which is the race. Both
+        // claims are parked at the rendezvous point above until both have arrived, so the
+        // loser's `None` can only come from the shared insert-if-absent.
+        let expiry = chrono::Utc::now() + chrono::Duration::days(8);
+        let (claim_a, claim_b) = tokio::join!(
+            replica_a.reserve_refresh_token(&refresh, expiry),
+            replica_b.reserve_refresh_token(&refresh, expiry),
+        );
+        let winners = [claim_a.as_ref(), claim_b.as_ref()]
+            .iter()
+            .filter(|claim| matches!(claim, Ok(Some(_))))
+            .count();
+        assert_eq!(
+            winners, 1,
+            "exactly one replica may hold the single-use reservation; got a={claim_a:?} b={claim_b:?}",
         );
     }
 

@@ -481,28 +481,43 @@ impl StorageBackend for FileBackend {
     }
 
     async fn delete_by_path(&self, path: &str) -> StorageResult<bool> {
-        // The read that locates the file and the unlink that removes it happen under the
+        // The read that locates the files and the unlinks that remove them happen under the
         // backend's advisory lock, so a concurrent `compare_and_set` at the same path
         // cannot publish a new record between them and have this call delete it by id.
+        //
+        // Every record at the path is removed, not just the first. `store` is keyed by id,
+        // so a rewrite carrying a fresh id leaves the previous file behind; `get_by_path`
+        // resolves the newest of them. Deleting only one left a superseded file on disk
+        // that still matched the path, and the next `get_by_path` — or `list`/`count` after
+        // the rewrite was superseded — reported the "deleted" secret again. Removing all
+        // candidates is what makes the delete stick.
         let _guard = self.acquire_lock()?;
         let entries = self.scan_entries()?;
+        let mut removed_any = false;
         for entry in entries {
-            if entry.path == path {
-                let file_path = self.entry_path(entry.id);
-                return match fs::remove_file(&file_path) {
-                    Ok(_) => Ok(true),
-                    Err(e) => Err(StorageError::BackendError {
+            if entry.path != path {
+                continue;
+            }
+            let file_path = self.entry_path(entry.id);
+            match fs::remove_file(&file_path) {
+                Ok(()) => removed_any = true,
+                // A file that another attempt already removed is not a failure: the path's
+                // record is gone either way, and the loop must go on to the remaining
+                // duplicates.
+                Err(e) if e.kind() == std::io::ErrorKind::NotFound => {}
+                Err(e) => {
+                    return Err(StorageError::BackendError {
                         backend: "File".to_string(),
                         message: format!(
                             "Failed to delete entry file {}: {}",
                             file_path.display(),
                             e
                         ),
-                    }),
-                };
+                    });
+                }
             }
         }
-        Ok(false)
+        Ok(removed_any)
     }
 
     fn coordination(&self) -> Coordination {
@@ -847,6 +862,66 @@ mod tests {
         assert!(
             leftovers.is_empty(),
             "no temporary file may survive a completed write: {leftovers:?}"
+        );
+    }
+
+    /// Regression: `delete_by_path` removed the *first* record its directory scan returned
+    /// for the path, while `get_by_path` resolves the *newest* by `(updated_at, id)`. A
+    /// rewrite under a fresh id therefore left the superseded file on disk, and after the
+    /// delete the path still resolved — the "deleted" secret was readable again. The delete
+    /// must remove every record at the path.
+    #[tokio::test]
+    async fn delete_by_path_removes_every_record_at_the_path() {
+        let dir = tempfile::tempdir().expect("temp dir");
+        let backend = FileBackend::new(dir.path().to_str().expect("utf8 path")).expect("backend");
+        let path = "contract/superseded";
+
+        let id1 = Uuid::new_v4();
+        let mut first = entry_at(id1, path, b"first");
+        first.updated_at = chrono::Utc::now() - chrono::Duration::seconds(5);
+        backend.store(&first).await.expect("store first");
+
+        // A rewrite under a fresh id: both files now sit on disk for one path, and the
+        // second is the one reads resolve to.
+        let id2 = Uuid::new_v4();
+        let second = entry_at(id2, path, b"second");
+        backend.store(&second).await.expect("store second");
+
+        assert!(
+            backend
+                .get_by_path(path)
+                .await
+                .expect("read before delete")
+                .is_some(),
+            "precondition: the path must resolve before the delete"
+        );
+
+        let removed = backend.delete_by_path(path).await.expect("delete by path");
+        assert!(
+            removed,
+            "the path existed, so the delete must report removal"
+        );
+
+        assert!(
+            backend
+                .get_by_path(path)
+                .await
+                .expect("read after delete")
+                .is_none(),
+            "a deleted path must not resolve, even when a superseded duplicate was on disk"
+        );
+        assert_eq!(
+            backend.count(&QueryParams::default()).await.expect("count"),
+            0,
+            "the superseded record must not survive the delete"
+        );
+        assert!(
+            backend
+                .list(&QueryParams::default())
+                .await
+                .expect("list")
+                .is_empty(),
+            "the superseded record must not appear in a listing"
         );
     }
 }

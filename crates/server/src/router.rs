@@ -91,7 +91,10 @@ pub fn build_router(state: AppState) -> Router {
             middleware::rate_limit::enforce,
         ))
         .layer(axum_middleware::from_fn_with_state(
-            middleware::security_headers::TrustedProxies(cfg.http.trusted_proxies),
+            middleware::security_headers::SchemePolicy {
+                trusted_proxies: cfg.http.trusted_proxies,
+                https_only: cfg.http.https_only,
+            },
             middleware::security_headers::apply,
         ))
         .layer(TraceLayer::new_for_http())

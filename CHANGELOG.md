@@ -160,6 +160,40 @@ and ~59k, and from not compiling at all to a green build with a full test suite.
   path = $1 AND metadata->>'storage_owner' = $11`, whose precondition and write are the same
   statement and which preserves the existing row's `id` and `created_at`; an absent path
   affects zero rows and fails closed.
+- **Two replicas sharing a backend could both exchange one refresh token.** The single-use
+  reservation that stops a refresh token being exchanged twice lived only in the process's
+  in-memory token blacklist, so two instances behind a load balancer each saw an unused
+  token and each minted a session — issuing two token pairs from one refresh. The
+  reservation is now claimed atomically in the shared backend, at a path derived from the
+  token's hash (never the token itself), with insert-if-absent before any fallible work; a
+  failed exchange releases it owner-conditionally and a completed one leaves it as a
+  permanent revocation. Backends that cannot coordinate across processes keep the in-memory
+  reservation, which is their complete guarantee.
+- **A TLS connection could lose its `Secure` cookie and HSTS.** The middleware decided
+  whether a request was secure from `request.uri().scheme_str()`, which is empty for an
+  HTTP/1.1 request in origin-form — every browser request — so a process serving TLS
+  classified its own connections as plain HTTP and emitted neither `Secure` nor HSTS. On
+  HTTP/2 the scheme is a client-supplied `:scheme` pseudo-header, so the same read let a
+  cleartext client forge `https`. The transport's TLS state is no longer read from the URI
+  at all: an operator whose listener terminates TLS declares it with `http.https_only`, the
+  only remaining source is a `X-Forwarded-Proto` from a trusted proxy, and a spoofed header
+  from an untrusted client still turns nothing on.
+- **`delete_by_path` on the file backend left the deleted secret readable.** It removed the
+  first record its directory scan returned for a path, while `get_by_path` resolves the
+  newest by `(updated_at, id)`; a rewrite under a fresh id left a superseded file that the
+  after-delete read still resolved. Every record at the path is now removed under the same
+  lock.
+- **A committed Redis transaction was invisible by path and orphaned mappings on delete.**
+  `RedisTransaction::commit` wrote only `secreton:entry:*`, never the `secreton:path:*`
+  mapping that `get_by_path`, `exists`, `list` and `count` resolve through, so a record
+  written in a transaction could not be read by path and a record deleted in one left a
+  mapping pointing at a missing entry. Commit now writes, repoints and removes the mapping
+  in the same server-side step as the body, and removes a mapping on delete only while it
+  still names the deleted id.
+- **The screenshot capture had a default password.** `SCREENSHOT_PASSWORD` fell back to a
+  committed literal, so a run without the variable silently captured the signed-out views
+  as if they were the authenticated ones. It now fails fast with a clear message; the CI
+  workflow already sets the variable, generated per run.
 
 ### Removed
 

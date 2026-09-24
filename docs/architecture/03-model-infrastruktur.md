@@ -167,9 +167,12 @@ Diterapkan oleh middleware `security_headers` pada setiap respons, bukan oleh re
 Karena tidak ada Nginx dalam deployment bawaannya, header ini harus datang dari proses itu
 sendiri. Header yang selalu ada mencakup `X-Frame-Options`, `X-Content-Type-Options`,
 `Content-Security-Policy`, `Referrer-Policy`, dan `Permissions-Policy`; HSTS hanya
-diterbitkan ketika skema efektif permintaan tervalidasi sebagai HTTPS — `X-Forwarded-Proto`
-dari klien langsung diabaikan kecuali `http.trusted_proxies` menyatakan adanya proxy
-tepercaya.
+diterbitkan ketika skema efektif permintaan tervalidasi sebagai HTTPS. Skema tidak dibaca
+dari URI permintaan — URI origin-form tidak membawa skema, dan pada HTTP/2 skema adalah
+pseudo-header yang dapat dipalsukan klien. Sumbernya adalah deklarasi operator
+`http.https_only` untuk listener yang men-terminate TLS, atau `X-Forwarded-Proto` yang
+datang dari proxy tepercaya (`http.trusted_proxies`); header itu dari klien langsung
+diabaikan.
 
 ### 4.3 Alur Autentikasi
 
