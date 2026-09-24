@@ -18,6 +18,7 @@ import { MIN_TARGET_PX, undersizedTargets } from "./layout.mjs";
 
 const REPO = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const LAYOUT_RS = path.join(REPO, "crates/ui/src/components/layout.rs");
+const NOT_FOUND_RS = path.join(REPO, "crates/ui/src/pages/not_found.rs");
 
 test("the minimum target size is the WCAG 2.5.8 figure", () => {
   // 24 CSS px is the AA minimum; the sign-out control's 20px line-height was the defect.
@@ -94,5 +95,42 @@ test("the sign-out control is tall enough to click", () => {
     undersizedTargets([{ width: 200, height: beforeHeight }]).length,
     1,
     "the pre-fix control shape must be flagged, or this test proves nothing"
+  );
+});
+
+/// The `class` attribute of the anchor whose text is `Back to the dashboard`.
+function backLinkClasses() {
+  const source = fs.readFileSync(NOT_FOUND_RS, "utf8");
+  const anchor = source
+    .match(/<a[\s\S]*?<\/a>/g)
+    ?.find((a) => a.includes("Back to the dashboard"));
+  assert.ok(anchor, "the 404 page must link back to the dashboard");
+  const classAttr = anchor.match(/class="([^"]+)"/);
+  assert.ok(classAttr, "the back link must carry a class attribute");
+  return classAttr[1];
+}
+
+test("the 404 back-link is tall enough to click", () => {
+  // The capture failed on the 404 view once the threshold moved from 8px to 24px: the link
+  // was `text-sm` with no vertical padding — 20px, the line-height alone. Its flex parent
+  // blockifies it, so WCAG 2.5.8's inline exception does not cover it and it is a real
+  // navigation target. Reverting the padding must fail here.
+  const classes = backLinkClasses();
+  const line = Object.entries(LINE_HEIGHT_PX).find(([tok]) => classes.includes(tok));
+  assert.ok(line, `the back link must set an explicit text size: ${classes}`);
+
+  const height = line[1] + verticalPaddingPx(classes);
+  assert.ok(
+    height >= MIN_TARGET_PX,
+    `the 404 back-link renders ${height}px tall, below the ${MIN_TARGET_PX}px minimum ` +
+      `(classes: ${classes})`
+  );
+
+  const before = classes.replace(/\bpy-([0-9.]+)\b/, "");
+  const beforeHeight = line[1] + verticalPaddingPx(before);
+  assert.equal(
+    undersizedTargets([{ width: 158, height: beforeHeight, inlineTextLink: false }]).length,
+    1,
+    "the pre-fix back-link shape must be flagged, or this test proves nothing"
   );
 });
