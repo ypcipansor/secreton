@@ -56,19 +56,34 @@ jobs:
     runs-on: ubuntu-latest
     permissions:
       contents: read
-      # gitleaks lists the pull request's commits to scan only what changed. Without
-      # this the call returns 403 "Resource not accessible by integration" and the
-      # job dies on an unhandled rejection.
-      pull-requests: read
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
+          # Full history: `gitleaks git` walks every commit, so a credential that was
+          # committed and later deleted is still found. A shallow clone would miss it.
           fetch-depth: 0
-      # Pinned to a release SHA. These previously tracked @master and @main, which
-      # means an upstream compromise executes in a workflow holding this repo's token.
-      - uses: gitleaks/gitleaks-action@e0c47f4f8be36e29cdc102c57e68cb5cbf0e8d1e # v3.0.0
+      # The gitleaks *action* now demands GITLEAKS_LICENSE for organisation accounts
+      # and fails with "missing gitleaks license" before scanning a single byte. The
+      # CLI is MIT-licensed and needs no key, so it is downloaded here instead. The
+      # version is pinned and the archive hash checked, so a compromised or retagged
+      # release cannot execute in a workflow holding this repository's token.
+      #
+      # The allowlist in .gitleaks.toml names the exact placeholder strings that the
+      # `generic-api-key` and `private-key` rules flag in test fixtures; it extends the
+      # default rules rather than replacing them.
+      - name: Install gitleaks
         env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GITLEAKS_VERSION: 8.30.1
+          GITLEAKS_SHA256: 551f6fc83ea457d62a0d98237cbad105af8d557003051f41f3e7ca7b3f2470eb
+        run: |
+          set -euo pipefail
+          curl -fsSL -o /tmp/gitleaks.tar.gz \
+            "https://github.com/gitleaks/gitleaks/releases/download/v${GITLEAKS_VERSION}/gitleaks_${GITLEAKS_VERSION}_linux_x64.tar.gz"
+          echo "${GITLEAKS_SHA256}  /tmp/gitleaks.tar.gz" | sha256sum -c -
+          tar -xzf /tmp/gitleaks.tar.gz -C /tmp gitleaks
+          /tmp/gitleaks version
+      - name: Scan the repository history
+        run: /tmp/gitleaks git --redact --no-banner --config .gitleaks.toml .
 
   vulnerabilities:
     name: Trivy filesystem scan

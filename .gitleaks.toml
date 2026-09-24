@@ -1,0 +1,36 @@
+# gitleaks configuration.
+#
+# Extends the bundled rules rather than replacing them, so new upstream detectors are
+# picked up automatically. The allowlist below is intentionally narrow: it names the
+# specific placeholder strings that the `generic-api-key` rule flags in test code, not
+# whole files, so a real credential added to one of those files is still reported.
+
+[extend]
+useDefault = true
+
+[[allowlists]]
+description = "Fixed, obviously-fake values used as test fixtures"
+regexTarget = "match"
+regexes = [
+  # assert_eq!(_key._name, "transit-_key-1") in crates/crypto key-rotation tests.
+  # `generic-api-key` sees `_name` next to a value containing "key" and reports it;
+  # the string is a hard-coded key label, not a secret.
+  '''transit-_key-1''',
+  # Placeholder keys in test fixtures (several of these files have since been deleted;
+  # the historical commits are still scanned).
+  '''secret-api-key-12345''',
+  '''test-api-key-12345''',
+  '''test_secret_1234567890abcdef''',
+  '''sk-1234567890abcdef''',
+  '''sk-123456789abcdef''',
+  # GCP/OCI engines tag records with their KMS algorithm, not a credential.
+  '''KEY_ALG_RSA_2048''',
+  # Mocked PEM bodies. A real key never has a literal MOCK_KEY_DATA body, a truncated
+  # `MIIEv...` body, an empty JSON object, or a `[Private _key _data...]` placeholder
+  # where the DER bytes belong.
+  '''MOCK_KEY_DATA''',
+  '''BEGIN PRIVATE KEY-----.+?\{\}''',
+  '''-----BEGIN PRIVATE KEY-----\\nMIIEv\.\.\.''',
+  '''-----BEGIN OPENSSH PRIVATE KEY-----''',
+  '''\[Private _key _data''',
+]
