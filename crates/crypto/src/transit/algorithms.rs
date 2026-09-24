@@ -188,13 +188,10 @@ pub fn derive_key(
         }
         KdfAlgorithm::Scrypt => {
             use scrypt::{Params, scrypt};
-            let params = Params::new(
-                14, // log_n (2^14 = 16384)
-                8,  // r
-                1,  // p
-                length,
-            )
-            .map_err(|e| CryptoError::KeyDerivationFailed(e.to_string()))?;
+            // log_n 14 (2^14 = 16384), r 8, p 1. The output length is taken from
+            // the `key` buffer, not from `Params`.
+            let params = Params::new(14, 8, 1)
+                .map_err(|e| CryptoError::KeyDerivationFailed(e.to_string()))?;
 
             let mut key = vec![0u8; length];
             scrypt(password, salt, &params, &mut key)

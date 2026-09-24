@@ -2,7 +2,7 @@
 
 use crate::{AlgorithmId, CryptoError, CryptoResult};
 use blake3::Hasher as Blake3Hasher;
-use hmac::{Hmac, Mac};
+use hmac::{Hmac, KeyInit, Mac};
 use serde::{Deserialize, Serialize};
 use sha2::{Digest as Sha2Digest, Sha256};
 use sha3::Sha3_256;
@@ -172,8 +172,7 @@ pub fn verify_hmac_sha256(key: &[u8], data: &[u8], expected_mac: &[u8]) -> Crypt
 pub mod password {
     use super::*;
     use argon2::{
-        Argon2, PasswordHash, PasswordHasher, PasswordVerifier,
-        password_hash::{SaltString, rand_core::OsRng},
+        Argon2, PasswordHash, PasswordHasher, PasswordVerifier, password_hash::phc::Salt,
     };
     use pbkdf2::pbkdf2_hmac;
     use sha2::Sha256;
@@ -189,11 +188,11 @@ pub mod password {
 
     /// Hash password with Argon2id
     pub fn hash_password_argon2(password: &str) -> CryptoResult<PasswordHashResult> {
-        let salt = SaltString::generate(&mut OsRng);
+        let salt = Salt::generate();
         let argon2 = Argon2::default();
 
         let password_hash = argon2
-            .hash_password(password.as_bytes(), &salt)
+            .hash_password_with_salt(password.as_bytes(), salt.as_ref())
             .map_err(|e| {
                 CryptoError::HashFailed(format!("Argon2 password hashing failed: {}", e))
             })?;
@@ -201,7 +200,7 @@ pub mod password {
         Ok(PasswordHashResult {
             algorithm: AlgorithmId::Argon2id,
             hash: password_hash.to_string(),
-            salt: salt.as_str().as_bytes().to_vec(),
+            salt: salt.to_salt_string().as_ref().as_bytes().to_vec(),
             iterations: 3, // Default Argon2 iterations
         })
     }
