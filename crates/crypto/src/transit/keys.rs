@@ -856,12 +856,14 @@ impl KeyVersion {
             }
 
             KeyType::EcdsaP256 => {
-                let secret_key = P256SecretKey::random(&mut rand::thread_rng());
+                use p256::elliptic_curve::Generate;
+                let secret_key = P256SecretKey::generate();
                 KeyMaterial::EcdsaP256(Box::new(secret_key))
             }
 
             KeyType::EcdsaSecp256k1 => {
-                let secret_key = K256SecretKey::random(&mut rand::thread_rng());
+                use k256::elliptic_curve::Generate;
+                let secret_key = K256SecretKey::generate();
                 KeyMaterial::EcdsaSecp256k1(Box::new(secret_key))
             }
 

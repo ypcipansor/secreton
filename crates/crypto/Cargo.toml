@@ -50,7 +50,7 @@ ed25519-dalek.workspace = true
 k256 = { version = "0.14", features = ["ecdsa"] }
 p256.workspace = true
 p384.workspace = true
-pkcs8 = "0.10"
+pkcs8 = { version = "0.11", features = ["alloc"] }
 signature = "3.0"
 x25519-dalek.workspace = true
 

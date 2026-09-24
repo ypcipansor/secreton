@@ -418,7 +418,7 @@ impl AdminService {
         use sha2::{Digest, Sha256};
         let mut hasher = Sha256::new();
         hasher.update(backup_data.as_bytes());
-        let checksum = format!("sha256:{:x}", hasher.finalize());
+        let checksum = format!("sha256:{}", hex::encode(hasher.finalize()));
 
         // Store backup metadata
         let mut metadata = HashMap::new();
@@ -602,7 +602,7 @@ impl AdminService {
         use sha2::{Digest, Sha256};
         let mut hasher = Sha256::new();
         hasher.update(&backup_data_bytes);
-        let computed_checksum = format!("sha256:{:x}", hasher.finalize());
+        let computed_checksum = format!("sha256:{}", hex::encode(hasher.finalize()));
 
         if let Some(stored_checksum) = backup_entry.metadata.get("checksum") {
             if stored_checksum != &computed_checksum {

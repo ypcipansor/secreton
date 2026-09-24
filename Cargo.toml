@@ -146,8 +146,8 @@ rand_core = { version = "0.6", features = ["getrandom"] }
 getrandom = "0.3"
 ed25519-dalek = { version = "3.0", features = ["rand_core", "pkcs8"] }
 x25519-dalek = "3.0"
-p256 = "0.14"
-p384 = "0.14"
+p256 = { version = "0.14", features = ["getrandom"] }
+p384 = { version = "0.14", features = ["getrandom"] }
 # `rust_crypto` is the pure-Rust provider. It transitively enables `rsa`, which we do
 # not want (RUSTSEC-2023-0071) but cannot drop: jsonwebtoken 10 installs its crypto
 # provider from exactly one of `rust_crypto` or `aws_lc_rs`, and selecting the
