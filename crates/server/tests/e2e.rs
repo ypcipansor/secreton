@@ -47,7 +47,9 @@ async fn test_server() -> axum_test::TestServer {
             .build(),
     };
 
-    axum_test::TestServer::new(build_router(state)).expect("test server")
+    // `TestServer::new` panics on failure since axum-test 19; `try_new` returns the
+    // error so the test reports which part of the server failed to build.
+    axum_test::TestServer::try_new(build_router(state)).expect("test server")
 }
 
 #[tokio::test]
