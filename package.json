@@ -7,7 +7,8 @@
   "scripts": {
     "screenshots": "node scripts/screenshots.mjs",
     "screenshots:check": "node scripts/check-tooling.mjs",
-    "browser:install": "node scripts/install-browser.mjs"
+    "browser:install": "node scripts/install-browser.mjs",
+    "test:screenshots": "node --test scripts/layout.test.mjs"
   },
   "devDependencies": {
     "playwright-core": "1.55.0"

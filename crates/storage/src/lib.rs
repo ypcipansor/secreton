@@ -386,14 +386,30 @@ impl QueryParams {
                 .sort_order
                 .as_deref()
                 .is_some_and(|o| o.eq_ignore_ascii_case("desc"));
-            let key = |entry: &SecretEntry| match sort_by.as_str() {
-                "path" => entry.path.clone(),
-                "created_at" => entry.created_at.to_rfc3339(),
-                "updated_at" => entry.updated_at.to_rfc3339(),
-                "security_level" => (entry.security_level as i32).to_string(),
-                other => entry.metadata.get(other).cloned().unwrap_or_default(),
-            };
-            entries.sort_by_key(key);
+            if sort_by == "expires_at" {
+                // Rank by the entry's own `expires_at`, not by a metadata lookup. The
+                // lifecycle sweep orders by `expires_at` precisely so a `limit` keeps the
+                // records closest to expiry: without this branch the sweep fell through to
+                // the metadata fallback, every entry keyed `""`, and the sort became a no-op
+                // — so the limit truncated arbitrary records and expired secrets past the
+                // cutoff were never swept. A `None` deadline means "never expires", which
+                // must sort last ascending rather than first.
+                entries.sort_by(|a, b| match (a.expires_at, b.expires_at) {
+                    (Some(x), Some(y)) => x.cmp(&y),
+                    (Some(_), None) => std::cmp::Ordering::Less,
+                    (None, Some(_)) => std::cmp::Ordering::Greater,
+                    (None, None) => std::cmp::Ordering::Equal,
+                });
+            } else {
+                let key = |entry: &SecretEntry| match sort_by.as_str() {
+                    "path" => entry.path.clone(),
+                    "created_at" => entry.created_at.to_rfc3339(),
+                    "updated_at" => entry.updated_at.to_rfc3339(),
+                    "security_level" => (entry.security_level as i32).to_string(),
+                    other => entry.metadata.get(other).cloned().unwrap_or_default(),
+                };
+                entries.sort_by_key(key);
+            }
             if descending {
                 entries.reverse();
             }
@@ -877,5 +893,89 @@ mod tests {
 
         let debug = format!("{:?}", error);
         assert!(debug.contains("NotFound"));
+    }
+
+    fn query_entry(path: &str, expires_in_minutes: Option<i64>) -> SecretEntry {
+        let mut entry = SecretEntry::new(
+            path.to_string(),
+            vec![1, 2, 3],
+            EncryptionMetadata::default(),
+            SecurityLevel::Internal,
+            Uuid::new_v4(),
+        );
+        entry.expires_at = expires_in_minutes.map(|m| Utc::now() + chrono::Duration::minutes(m));
+        entry
+    }
+
+    #[test]
+    fn expires_at_sort_orders_by_the_entries_own_deadline() {
+        // `expires_at` is not a metadata key, so it used to fall through to the metadata
+        // fallback, keying every entry `""` and leaving the ordering untouched. The
+        // lifecycle sweep relies on this ordering to keep the records closest to expiry
+        // inside its `limit`, so a no-op sort silently made the sweep miss expired secrets.
+        let far = query_entry("kv/far", Some(10_000));
+        let near = query_entry("kv/near", Some(1));
+        let never = query_entry("kv/never", None);
+
+        let params = QueryParams {
+            sort_by: Some("expires_at".to_string()),
+            sort_order: Some("asc".to_string()),
+            include_expired: true,
+            ..Default::default()
+        };
+
+        let ordered = params.apply_to(vec![never.clone(), far.clone(), near.clone()]);
+        let paths: Vec<&str> = ordered.iter().map(|e| e.path.as_str()).collect();
+        assert_eq!(
+            paths,
+            vec!["kv/near", "kv/far", "kv/never"],
+            "ascending `expires_at` must order by the real deadline with no-deadline last"
+        );
+
+        let params_desc = QueryParams {
+            sort_by: Some("expires_at".to_string()),
+            sort_order: Some("desc".to_string()),
+            include_expired: true,
+            ..Default::default()
+        };
+        let ordered_desc = params_desc.apply_to(vec![never, far, near]);
+        let paths: Vec<&str> = ordered_desc.iter().map(|e| e.path.as_str()).collect();
+        assert_eq!(paths, vec!["kv/never", "kv/far", "kv/near"]);
+    }
+
+    #[test]
+    fn excluded_prefixes_are_applied_before_the_limit_truncates() {
+        // The sweep asks for reserved namespaces to be excluded *and* a limit while sorting
+        // by expiry. A backend that counts reserved entries against the limit truncates live
+        // records before the expired one, so the expired secret is never returned and never
+        // swept.
+        let expired = query_entry("apps/expired", Some(-1));
+        let reserved: Vec<SecretEntry> = (0..5)
+            .map(|i| query_entry(&format!("sys/reserved/{i}"), None))
+            .collect();
+
+        let params = QueryParams {
+            include_expired: true,
+            limit: Some(2),
+            sort_by: Some("expires_at".to_string()),
+            sort_order: Some("asc".to_string()),
+            excluded_path_prefixes: vec!["sys/".to_string()],
+            ..Default::default()
+        };
+
+        let mut all = reserved.clone();
+        all.push(expired.clone());
+        let listed = params.apply_to(all);
+
+        assert!(
+            listed.iter().any(|e| e.path == "apps/expired"),
+            "the expired user secret must survive the limit once reserved entries are \
+             excluded first; got {:?}",
+            listed.iter().map(|e| e.path.as_str()).collect::<Vec<_>>()
+        );
+        assert!(
+            listed.iter().all(|e| !e.path.starts_with("sys/")),
+            "reserved entries must not be returned at all"
+        );
     }
 }

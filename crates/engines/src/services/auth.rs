@@ -1319,28 +1319,20 @@ impl AuthenticationService {
             .validate_refresh_token(refresh_token)
             .map_err(|_| AuthError::InvalidToken)?;
 
-        // Revoke the old refresh token so it cannot be reused.
-        // This implements single-use refresh token rotation: each refresh
-        // token can only be exchanged once.  Without this, a captured
-        // refresh token could be replayed indefinitely to generate new
-        // sessions without invalidating previous ones.
+        // Reserve the single-use slot atomically, before the fallible work below.
         //
-        // We also attempt to find and revoke the old session that was
-        // associated with this refresh token, so that the old access token
-        // is invalidated as well.
+        // This is the authority for reuse detection: two concurrent requests for the same
+        // refresh token both pass the fast-path check, but only the first to take the write
+        // lock finds the slot empty and inserts; the second observes the entry and is
+        // rejected. The reservation is in-memory only at this point — the durable
+        // revocation is written by [`Self::commit_refresh_token_rotation`] *after* the new
+        // session is stored. Writing the revocation here instead, as this used to, meant a
+        // later failure (a storage hiccup loading the user, an MFA service error, a failed
+        // session write) returned an error while the old token was already blacklisted: the
+        // caller held no new token and could never retry with the old one, so a transient
+        // fault permanently logged them out. A failure that issues no session now releases
+        // the reservation instead of consuming it.
         let refresh_expiry = chrono::Utc::now() + chrono::Duration::days(8);
-        // Atomically check-and-insert the refresh token into the in-memory
-        // blacklist while holding the write lock across both operations.
-        // This closes the TOCTOU window between the `is_token_revoked` call
-        // above and the `revoke_token` insert below: two concurrent requests
-        // for the same refresh token will both pass the fast-path check, but
-        // only the first one to acquire the write lock will find the slot
-        // empty and insert — the second will observe the existing entry and
-        // be rejected with `InvalidToken`.
-        //
-        // The shared storage layer is still updated via `revoke_token` below
-        // so that cross-instance revocation continues to work; that call is
-        // idempotent on the storage side (same hash-keyed path).
         {
             let mut blacklist = self.token_blacklist.write().await;
             if let Some(expires_at) = blacklist.get(refresh_token)
@@ -1350,76 +1342,14 @@ impl AuthenticationService {
             }
             blacklist.insert(refresh_token.to_string(), refresh_expiry);
         }
-        {
-            // Revoke the refresh token itself (add to blacklist with a
-            // generous expiry — refresh tokens are long-lived).
-            //
-            // The in-memory insert was already done atomically above; this
-            // call re-inserts the same entry (idempotent) and additionally
-            // persists the revocation to shared storage for cross-instance
-            // propagation.
-            self.revoke_token(refresh_token.to_string(), refresh_expiry)
-                .await;
 
-            // Best-effort: find and delete the old session whose refresh_token
-            // matches the one being exchanged.  This is a scan over the
-            // session prefix — acceptable because refresh is infrequent.
-            //
-            // Cap the scan with an explicit upper bound.  Before the
-            // PostgreSQL backend's default `LIMIT 100` was removed (in the
-            // lifecycle PR), this scan was implicitly bounded; without an
-            // explicit limit it would now load every active session into
-            // memory on every refresh.
-            //
-            // TODO: Index sessions by refresh-token hash so this scan can be
-            // replaced with a direct lookup.
-            const SESSION_REFRESH_SCAN_MAX_ENTRIES: u32 = 10_000;
-            let params = secreton_storage::QueryParams {
-                path_prefix: Some(SESSION_STORAGE_PREFIX.to_string()),
-                include_expired: false,
-                limit: Some(SESSION_REFRESH_SCAN_MAX_ENTRIES),
-                ..Default::default()
-            };
-            if let Ok(entries) = self.storage.list(&params).await {
-                for entry in entries {
-                    let session_bytes = match self.crypto.decrypt(&entry.encrypted_data).await {
-                        Ok(decrypted) => decrypted,
-                        Err(decrypt_err) => {
-                            // Only fall back to raw bytes if they look like
-                            // valid JSON (legacy plaintext session).
-                            if serde_json::from_slice::<serde_json::Value>(&entry.encrypted_data)
-                                .is_ok()
-                            {
-                                tracing::warn!(
-                                    "Session '{}': decryption failed, using legacy plaintext fallback",
-                                    entry.path
-                                );
-                                entry.encrypted_data.clone()
-                            } else {
-                                tracing::warn!(
-                                    "Session '{}': decryption failed ({}) and raw data is not valid JSON; \
-                                     skipping corrupt entry",
-                                    entry.path,
-                                    decrypt_err
-                                );
-                                continue; // skip corrupt entries
-                            }
-                        }
-                    };
-                    if let Ok(session) = serde_json::from_slice::<Session>(&session_bytes)
-                        && session.refresh_token.as_deref() == Some(refresh_token)
-                    {
-                        // Revoke the old access token
-                        self.revoke_token(session.token.clone(), session.expires_at)
-                            .await;
-                        // Delete the old session record
-                        let _ = self.storage.delete_by_path(&entry.path).await;
-                        break;
-                    }
-                }
-            }
-        }
-
+        // Everything from here can fail for a non-security reason: reading the user,
+        // verifying MFA, minting the pair, persisting the new session. The reservation above
+        // must be released if the caller ends up with no new token, or a transient fault
+        // consumes the refresh token and logs them out permanently. The `Err` arm below is
+        // the only place that releases it; a security denial returns from inside without a
+        // reservation leak because those paths deliberately keep the token revoked.
+        let rotation: Result<AuthToken, AuthError> = async {
         // Get effective config for session timeout
         let (session_timeout_secs, _) = self.get_effective_config().await;
 
@@ -1632,6 +1562,114 @@ impl AuthenticationService {
             expires_in: token_pair.expires_in,
             user,
         })
+        }
+        .await;
+
+        match rotation {
+            Ok(token) => {
+                // The new session is durable, so the old refresh token can be revoked for
+                // real. This is the step that makes reuse fail: `commit_refresh_token_rotation`
+                // persists the revocation and invalidates the old session that carried this
+                // token, so a replay after a successful exchange is rejected by both the
+                // in-memory reservation and the durable record.
+                self.commit_refresh_token_rotation(refresh_token, refresh_expiry)
+                    .await;
+                Ok(token)
+            }
+            Err(e) => {
+                // Nothing was issued, so the reservation must not consume the token: release
+                // the in-memory slot and remove any durable shadow a racing attempt may have
+                // written, then return the original error. A retry with the same refresh
+                // token succeeds if the fault was transient; a genuine reuse still fails,
+                // because a successful rotation would have committed the revocation.
+                self.release_refresh_token_reservation(refresh_token).await;
+                Err(e)
+            }
+        }
+    }
+
+    /// Persist a completed refresh rotation: revoke the exchanged refresh token durably and
+    /// invalidate the old session that carried it.
+    async fn commit_refresh_token_rotation(
+        &self,
+        refresh_token: &str,
+        refresh_expiry: chrono::DateTime<chrono::Utc>,
+    ) {
+        self.revoke_token(refresh_token.to_string(), refresh_expiry)
+            .await;
+
+        // Best-effort: find and delete the old session whose refresh_token
+        // matches the one being exchanged.  This is a scan over the
+        // session prefix — acceptable because refresh is infrequent.
+        //
+        // Cap the scan with an explicit upper bound.  Before the
+        // PostgreSQL backend's default `LIMIT 100` was removed (in the
+        // lifecycle PR), this scan was implicitly bounded; without an
+        // explicit limit it would now load every active session into
+        // memory on every refresh.
+        //
+        // TODO: Index sessions by refresh-token hash so this scan can be
+        // replaced with a direct lookup.
+        const SESSION_REFRESH_SCAN_MAX_ENTRIES: u32 = 10_000;
+        let params = secreton_storage::QueryParams {
+            path_prefix: Some(SESSION_STORAGE_PREFIX.to_string()),
+            include_expired: false,
+            limit: Some(SESSION_REFRESH_SCAN_MAX_ENTRIES),
+            ..Default::default()
+        };
+        if let Ok(entries) = self.storage.list(&params).await {
+            for entry in entries {
+                let session_bytes = match self.crypto.decrypt(&entry.encrypted_data).await {
+                    Ok(decrypted) => decrypted,
+                    Err(decrypt_err) => {
+                        // Only fall back to raw bytes if they look like
+                        // valid JSON (legacy plaintext session).
+                        if serde_json::from_slice::<serde_json::Value>(&entry.encrypted_data)
+                            .is_ok()
+                        {
+                            tracing::warn!(
+                                "Session '{}': decryption failed, using legacy plaintext fallback",
+                                entry.path
+                            );
+                            entry.encrypted_data.clone()
+                        } else {
+                            tracing::warn!(
+                                "Session '{}': decryption failed ({}) and raw data is not valid JSON; \
+                                 skipping corrupt entry",
+                                entry.path,
+                                decrypt_err
+                            );
+                            continue; // skip corrupt entries
+                        }
+                    }
+                };
+                if let Ok(session) = serde_json::from_slice::<Session>(&session_bytes)
+                    && session.refresh_token.as_deref() == Some(refresh_token)
+                {
+                    // Revoke the old access token
+                    self.revoke_token(session.token.clone(), session.expires_at)
+                        .await;
+                    // Delete the old session record
+                    let _ = self.storage.delete_by_path(&entry.path).await;
+                    break;
+                }
+            }
+        }
+    }
+
+    /// Drop the in-memory single-use reservation for a refresh token whose exchange failed.
+    ///
+    /// Only called when the exchange issued no session; a completed rotation never releases.
+    /// The durable shadow is deleted too, in case a racing attempt's `revoke_token` wrote one
+    /// between this attempt's reservation and its failure — leaving it would revoke a token
+    /// this attempt never successfully exchanged.
+    async fn release_refresh_token_reservation(&self, refresh_token: &str) {
+        {
+            let mut blacklist = self.token_blacklist.write().await;
+            blacklist.remove(refresh_token);
+        }
+        let path = Self::revoked_token_path(refresh_token);
+        let _ = self.storage.delete_by_path(&path).await;
     }
 
     /// Register a new user
@@ -1955,6 +1993,13 @@ impl AuthenticationService {
     /// whatever the interactive-session policy was, so the one credential that can
     /// reconfigure the vault lived for a day. Bootstrap credentials take
     /// [`BOOTSTRAP_TOKEN_TTL_SECS`] and the caller says so.
+    ///
+    /// The session is **access-only**: no refresh token is minted and none is stored. The
+    /// only caller is the unseal path, and the root bootstrap credential must not be
+    /// extendable — a refresh token would let the holder mint a fresh root access token
+    /// indefinitely, outliving the one-hour bootstrap TTL the whole design rests on. Because
+    /// the session record carries `refresh_token: None`, there is nothing to exchange, and
+    /// `refresh_token()` cannot rotate this credential.
     pub async fn issue_session_token(
         &self,
         user: &User,
@@ -1967,9 +2012,12 @@ impl AuthenticationService {
                 .unwrap_or(chrono::Duration::hours(1));
 
         let session_id = Uuid::new_v4().to_string();
-        let token_pair = self
+        // Mint the access token directly rather than a pair, so no refresh token exists even
+        // transiently. `create_token_pair_with_duration` would sign one that, while unstored,
+        // remains a valid signed refresh JWT to anyone who received it.
+        let access_token = self
             .token_service
-            .create_token_pair_with_duration(
+            .create_access_token_with_duration(
                 &user.id,
                 &user.username,
                 user.email.as_deref(),
@@ -1984,15 +2032,15 @@ impl AuthenticationService {
         self.create_and_store_session(
             &user.id,
             session_id,
-            token_pair.access_token.clone(),
-            Some(token_pair.refresh_token.clone()),
+            access_token.clone(),
+            None,
             ip_address,
             user_agent,
             duration_secs,
         )
         .await?;
 
-        Ok(token_pair.access_token)
+        Ok(access_token)
     }
 
     /// Check if user has permission (simplified)
@@ -2738,6 +2786,7 @@ mod tests {
         CombinedMfaService, DefaultPushService, DefaultRecoveryCodeService, DefaultWebAuthnService,
         EmailConfig, InMemoryEmailService, InMemoryHardwareService, InMemorySmsService, SmsConfig,
     };
+    use secreton_storage::StorageResult;
     use secreton_storage::backends::MemoryBackend;
 
     #[tokio::test]
@@ -2913,6 +2962,215 @@ mod tests {
                 .with_mfa(mfa),
         );
         (storage, service, root_key)
+    }
+
+    /// A backend that fails the *next* `store` of a session record, so a test can prove a
+    /// failure after a refresh token is reserved does not permanently consume it.
+    #[derive(Debug)]
+    struct FailingSessionStore {
+        inner: MemoryBackend,
+        armed: std::sync::atomic::AtomicBool,
+        fired: std::sync::atomic::AtomicBool,
+    }
+
+    impl FailingSessionStore {
+        fn new() -> Self {
+            Self {
+                inner: MemoryBackend::new(),
+                armed: std::sync::atomic::AtomicBool::new(false),
+                fired: std::sync::atomic::AtomicBool::new(false),
+            }
+        }
+    }
+
+    #[async_trait::async_trait]
+    impl StorageBackend for FailingSessionStore {
+        async fn store(&self, entry: &SecretEntry) -> StorageResult<()> {
+            if self.armed.load(std::sync::atomic::Ordering::SeqCst)
+                && entry.path.starts_with(SESSION_STORAGE_PREFIX)
+            {
+                self.armed.store(false, std::sync::atomic::Ordering::SeqCst);
+                self.fired.store(true, std::sync::atomic::Ordering::SeqCst);
+                return Err(secreton_storage::StorageError::BackendError {
+                    backend: "fault-injected".to_string(),
+                    message: "injected session store failure".to_string(),
+                });
+            }
+            self.inner.store(entry).await
+        }
+        async fn get_by_id(&self, id: Uuid) -> StorageResult<Option<SecretEntry>> {
+            self.inner.get_by_id(id).await
+        }
+        async fn get_by_path(&self, path: &str) -> StorageResult<Option<SecretEntry>> {
+            self.inner.get_by_path(path).await
+        }
+        async fn update(&self, entry: &SecretEntry) -> StorageResult<()> {
+            self.inner.update(entry).await
+        }
+        async fn upsert(&self, entry: &SecretEntry) -> StorageResult<()> {
+            self.inner.upsert(entry).await
+        }
+        async fn delete_by_id(&self, id: Uuid) -> StorageResult<bool> {
+            self.inner.delete_by_id(id).await
+        }
+        async fn delete_by_path(&self, path: &str) -> StorageResult<bool> {
+            self.inner.delete_by_path(path).await
+        }
+        async fn list(&self, params: &QueryParams) -> StorageResult<Vec<SecretEntry>> {
+            self.inner.list(params).await
+        }
+        async fn count(&self, params: &QueryParams) -> StorageResult<u64> {
+            self.inner.count(params).await
+        }
+        async fn exists(&self, path: &str) -> StorageResult<bool> {
+            self.inner.exists(path).await
+        }
+        async fn begin_transaction(
+            &self,
+        ) -> StorageResult<Box<dyn secreton_storage::StorageTransaction>> {
+            self.inner.begin_transaction().await
+        }
+        async fn health_check(&self) -> StorageResult<secreton_storage::HealthStatus> {
+            self.inner.health_check().await
+        }
+        async fn get_stats(&self) -> StorageResult<secreton_storage::StorageStats> {
+            self.inner.get_stats().await
+        }
+        async fn migrate(&self) -> StorageResult<()> {
+            self.inner.migrate().await
+        }
+        async fn store_oauth_state(
+            &self,
+            state: &secreton_domain::OAuthState,
+        ) -> StorageResult<()> {
+            self.inner.store_oauth_state(state).await
+        }
+        async fn get_oauth_state(
+            &self,
+            state: &str,
+        ) -> StorageResult<Option<secreton_domain::OAuthState>> {
+            self.inner.get_oauth_state(state).await
+        }
+        async fn delete_expired_oauth_states(&self) -> StorageResult<u64> {
+            self.inner.delete_expired_oauth_states().await
+        }
+    }
+
+    /// A service over a caller-supplied backend, with the root key installed so record
+    /// encryption works — the same graph [`auth_with_open_barrier`] builds.
+    async fn auth_with_storage(
+        storage: Arc<dyn StorageBackend + Send + Sync>,
+    ) -> Arc<AuthenticationService> {
+        let crypto = Arc::new(CryptoService::new(storage.clone()).await.unwrap());
+        let root_key = secreton_crypto::generate_key(secreton_crypto::AlgorithmId::Aes256Gcm)
+            .expect("root key");
+        crypto
+            .set_root_key(root_key)
+            .await
+            .expect("install root key");
+
+        let mut config = AuthConfig::default();
+        config.jwt.secret = Some("test_secret".to_string());
+        config.jwt.issuer = "secreton".to_string();
+        config.jwt.audience = "secreton-api".to_string();
+
+        let mfa = Arc::new(CombinedMfaService::new(
+            Arc::new(PersistentTotpService::new(
+                storage.clone(),
+                crypto.clone(),
+                "secreton-test".to_string(),
+            )),
+            Arc::new(InMemorySmsService::new(SmsConfig::default())),
+            Arc::new(InMemoryEmailService::new(EmailConfig::default())),
+            Arc::new(InMemoryHardwareService::new()),
+            Arc::new(DefaultPushService::new_mock()),
+            Arc::new(DefaultWebAuthnService::new_default()),
+            Arc::new(DefaultRecoveryCodeService::new()),
+        ));
+
+        Arc::new(
+            AuthenticationService::new(storage, crypto, &config)
+                .await
+                .unwrap()
+                .with_mfa(mfa),
+        )
+    }
+
+    #[tokio::test]
+    async fn a_failed_session_write_does_not_consume_the_refresh_token() {
+        // Regression: `refresh_token` blacklisted the old refresh token *before* doing the
+        // fallible work — loading the user, minting the pair, storing the new session. A
+        // storage fault after that point returned an error while the old token was already
+        // revoked, so the caller held no new token and could never retry with the old one:
+        // a transient fault logged them out permanently.
+        //
+        // The property: after a failed exchange the same refresh token still works once,
+        // and once it has been exchanged successfully, replaying it is still refused.
+        let _env = crate::test_support::without_root_key();
+        let storage = Arc::new(FailingSessionStore::new());
+        let storage_dyn: Arc<dyn StorageBackend + Send + Sync> = storage.clone();
+        let service = auth_with_storage(storage_dyn).await;
+
+        let password = crate::test_support::generated_password();
+        service
+            .register_user(
+                "refresh-user",
+                &password,
+                None,
+                vec!["user".to_string()],
+                vec![],
+            )
+            .await
+            .expect("register user");
+
+        let login = service
+            .login(
+                ApiLoginRequest {
+                    username: "refresh-user".to_string(),
+                    password,
+                    mfa_code: None,
+                },
+                "192.0.2.1".to_string(),
+                "test".to_string(),
+            )
+            .await
+            .expect("login");
+        let refresh = login.token.refresh_token.clone();
+
+        // Inject a storage fault on the next session write, which is exactly the step after
+        // the old token is reserved.
+        storage
+            .armed
+            .store(true, std::sync::atomic::Ordering::SeqCst);
+        let failed = service
+            .refresh_token(&refresh, "192.0.2.1".to_string(), "test".to_string())
+            .await;
+        assert!(
+            failed.is_err(),
+            "the injected storage failure must surface to the caller"
+        );
+        assert!(
+            storage.fired.load(std::sync::atomic::Ordering::SeqCst),
+            "the session-write fault must actually have fired, or this test proves nothing"
+        );
+
+        // The retry with the same refresh token must succeed — the failed attempt released
+        // its reservation rather than consuming the token.
+        let exchanged = service
+            .refresh_token(&refresh, "192.0.2.1".to_string(), "test".to_string())
+            .await
+            .expect("the retry must succeed with the same refresh token");
+        assert!(!exchanged.access_token.is_empty());
+
+        // And now that the exchange committed, replaying the old token is refused: releasing
+        // the reservation on failure must not weaken reuse detection after success.
+        let replay = service
+            .refresh_token(&refresh, "192.0.2.1".to_string(), "test".to_string())
+            .await;
+        assert!(
+            replay.is_err(),
+            "a refresh token exchanged successfully must not be replayable"
+        );
     }
 
     #[tokio::test]

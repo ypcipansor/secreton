@@ -1301,11 +1301,21 @@ impl SealService {
                     // them from a delete that silently failed.
                 }
                 Err(secreton_storage::StorageError::Unsupported { .. }) => {
-                    // The backend cannot delete conditionally. Fall through to the
-                    // unconditional delete, which the read-back still verifies.
-                    if !self.delete_unconditionally(path).await {
-                        return false;
-                    }
+                    // The backend claims `CrossProcess` but cannot delete conditionally.
+                    // That is a contradiction in the backend, and falling back to an
+                    // unconditional delete here would be worse than the missing capability:
+                    // the caller asked to remove only a record it still owns and would then
+                    // remove whatever is there, including a newer attempt's artifact. Fail
+                    // closed, keep the staging marker, and let a later retry — or an operator
+                    // with a working backend — finish the cleanup.
+                    tracing::error!(
+                        "Refusing to delete '{}' during cleanup: the backend reports \
+                         cross-process coordination but `delete_owned` is unsupported, so \
+                         the removal cannot be scoped to this attempt's owner. The staging \
+                         marker is kept so the cleanup can be retried.",
+                        path
+                    );
+                    return false;
                 }
                 Err(e) => {
                     tracing::error!(
@@ -1887,6 +1897,71 @@ mod tests {
         assert_eq!(
             claims["username"], ROOT_USERNAME,
             "the token must name the account init created, not a hard-coded 'root'"
+        );
+    }
+
+    #[tokio::test]
+    async fn the_bootstrap_credential_is_access_only() {
+        // Security regression: `issue_session_token` minted a full token *pair* and stored
+        // the refresh half on the bootstrap session. A refresh token outlives the
+        // one-hour bootstrap TTL by design, so the most privileged credential in the
+        // system could be rotated indefinitely — the TTL the whole design rests on would
+        // be decorative.
+        //
+        // The property: the session record behind the bootstrap token carries no refresh
+        // token, so there is nothing to exchange and `refresh_token()` cannot extend it.
+        let _env = crate::test_support::without_root_key();
+        let vault = sealed_vault().await;
+
+        let init = vault
+            .seal
+            .init(2, 2, "access-only-root", &vault.auth, &vault.mfa)
+            .await
+            .expect("init");
+        vault.seal.unseal(&init.keys[0]).await.expect("share one");
+        let token = vault
+            .seal
+            .unseal(&init.keys[1])
+            .await
+            .expect("share two")
+            .root_token
+            .expect("root credential");
+
+        // The session is located by the token's own `jti`, the same way `validate_token`
+        // does, so this reads the exact record the credential is bound to.
+        let jti = claims_of(&token)["jti"]
+            .as_str()
+            .expect("the access token carries a jti")
+            .to_string();
+        let path = format!("sys/auth/sessions/{jti}");
+        let entry = vault
+            .storage
+            .get_by_path(&path)
+            .await
+            .expect("storage")
+            .expect("the bootstrap session record must exist");
+        let plaintext = vault
+            .crypto
+            .decrypt(&entry.encrypted_data)
+            .await
+            .expect("decrypt the session record");
+        let session: serde_json::Value =
+            serde_json::from_slice(&plaintext).expect("the session record is JSON");
+        assert!(
+            session["refresh_token"].is_null(),
+            "a bootstrap session must be access-only, but the session record carries a \
+             refresh token"
+        );
+
+        // And the credential itself cannot be exchanged. `refresh_token` rejects it because
+        // no matching refresh token was ever issued.
+        assert!(
+            vault
+                .auth
+                .refresh_token(&token, "192.0.2.1".to_string(), "test".to_string())
+                .await
+                .is_err(),
+            "the bootstrap access token must not be exchangeable for a refreshed credential"
         );
     }
 
@@ -3680,6 +3755,211 @@ mod tests {
                 .expect("storage")
                 .is_none(),
             "a successful retry must not leave its staging marker behind"
+        );
+    }
+
+    /// A cross-process backend that cannot perform an ownership-scoped delete.
+    ///
+    /// A backend is not allowed to report `Coordination::CrossProcess` and then refuse
+    /// `delete_owned`, but a wrapper can: the capability is proxied, and a misconfigured
+    /// deployment must fail closed rather than degrade into a delete that removes whatever
+    /// happens to be at the path.
+    #[derive(Debug)]
+    struct CrossProcessWithoutScopedDelete {
+        inner: Arc<MemoryBackend>,
+    }
+
+    impl CrossProcessWithoutScopedDelete {
+        fn new() -> Self {
+            Self {
+                inner: Arc::new(MemoryBackend::new()),
+            }
+        }
+    }
+
+    #[async_trait::async_trait]
+    impl StorageBackend for CrossProcessWithoutScopedDelete {
+        fn coordination(&self) -> secreton_storage::Coordination {
+            secreton_storage::Coordination::CrossProcess
+        }
+        async fn store(&self, entry: &SecretEntry) -> StorageResult<()> {
+            self.inner.store(entry).await
+        }
+        async fn get_by_id(&self, id: Uuid) -> StorageResult<Option<SecretEntry>> {
+            self.inner.get_by_id(id).await
+        }
+        async fn get_by_path(&self, path: &str) -> StorageResult<Option<SecretEntry>> {
+            self.inner.get_by_path(path).await
+        }
+        async fn update(&self, entry: &SecretEntry) -> StorageResult<()> {
+            self.inner.update(entry).await
+        }
+        async fn upsert(&self, entry: &SecretEntry) -> StorageResult<()> {
+            self.inner.upsert(entry).await
+        }
+        async fn delete_by_id(&self, id: Uuid) -> StorageResult<bool> {
+            self.inner.delete_by_id(id).await
+        }
+        async fn delete_by_path(&self, path: &str) -> StorageResult<bool> {
+            self.inner.delete_by_path(path).await
+        }
+        async fn delete_owned(&self, _path: &str, _token: &str) -> StorageResult<bool> {
+            Err(secreton_storage::StorageError::Unsupported {
+                operation: "delete_owned".to_string(),
+                backend: "cross-process-without-scoped-delete".to_string(),
+            })
+        }
+        async fn compare_and_set(
+            &self,
+            entry: &SecretEntry,
+            expect: Expect<'_>,
+        ) -> StorageResult<bool> {
+            self.inner.compare_and_set(entry, expect).await
+        }
+        async fn store_fenced(
+            &self,
+            entry: &SecretEntry,
+            fence: secreton_storage::StorageFence<'_>,
+        ) -> StorageResult<bool> {
+            self.inner.store_fenced(entry, fence).await
+        }
+        async fn list(
+            &self,
+            params: &secreton_storage::QueryParams,
+        ) -> StorageResult<Vec<SecretEntry>> {
+            self.inner.list(params).await
+        }
+        async fn count(&self, params: &secreton_storage::QueryParams) -> StorageResult<u64> {
+            self.inner.count(params).await
+        }
+        async fn exists(&self, path: &str) -> StorageResult<bool> {
+            self.inner.exists(path).await
+        }
+        async fn begin_transaction(
+            &self,
+        ) -> StorageResult<Box<dyn secreton_storage::StorageTransaction>> {
+            self.inner.begin_transaction().await
+        }
+        async fn health_check(&self) -> StorageResult<secreton_storage::HealthStatus> {
+            self.inner.health_check().await
+        }
+        async fn get_stats(&self) -> StorageResult<secreton_storage::StorageStats> {
+            self.inner.get_stats().await
+        }
+        async fn migrate(&self) -> StorageResult<()> {
+            self.inner.migrate().await
+        }
+        async fn store_oauth_state(
+            &self,
+            state: &secreton_domain::OAuthState,
+        ) -> StorageResult<()> {
+            self.inner.store_oauth_state(state).await
+        }
+        async fn get_oauth_state(
+            &self,
+            state: &str,
+        ) -> StorageResult<Option<secreton_domain::OAuthState>> {
+            self.inner.get_oauth_state(state).await
+        }
+        async fn delete_expired_oauth_states(&self) -> StorageResult<u64> {
+            self.inner.delete_expired_oauth_states().await
+        }
+    }
+
+    #[tokio::test]
+    async fn an_unsupported_scoped_delete_does_not_fall_back_to_an_unconditional_one() {
+        // Regression: on a backend that reports `Coordination::CrossProcess` but answers
+        // `Unsupported` for `delete_owned`, cleanup fell back to `delete_unconditionally`.
+        // That removes whatever is at the path — including an artifact another attempt
+        // owns — which is the one thing the ownership scoping exists to prevent.
+        //
+        // The property: the foreign record survives, the staging marker survives so the
+        // cleanup can be retried, and `init` reports the failure instead of proceeding.
+        let _env = crate::test_support::without_root_key();
+        let storage = Arc::new(CrossProcessWithoutScopedDelete::new());
+        let vault = sealed_vault_with_storage(storage.clone()).await;
+
+        // A crashed attempt left a partial init. The root key it wrote belongs to a
+        // *different* owner than the staging attempt that will try to clean up.
+        let config = serde_json::to_vec(&InitConfig {
+            shares: 3,
+            threshold: 2,
+        })
+        .expect("serialise init config");
+        storage
+            .store(&SecretEntry::new(
+                INIT_PATH.to_string(),
+                config,
+                EncryptionMetadata::default(),
+                SecurityLevel::Public,
+                Uuid::nil(),
+            ))
+            .await
+            .expect("store the partial init config");
+        storage
+            .store(
+                &SecretEntry::new(
+                    ROOT_KEY_PATH.to_string(),
+                    b"another attempts key".to_vec(),
+                    EncryptionMetadata::default(),
+                    SecurityLevel::Secret,
+                    Uuid::nil(),
+                )
+                .owned_by("another-attempt"),
+            )
+            .await
+            .expect("store a foreign root key");
+        let staging = serde_json::to_vec(&InitStaging {
+            root_username: "cleanup-root".to_string(),
+            root_entity_id: None,
+            committed: false,
+            owner: Some("this-attempt".to_string()),
+        })
+        .expect("serialise staging");
+        storage
+            .store(&SecretEntry::new(
+                INIT_STAGING_PATH.to_string(),
+                staging,
+                EncryptionMetadata::default(),
+                SecurityLevel::Internal,
+                Uuid::nil(),
+            ))
+            .await
+            .expect("store the staging marker");
+
+        let outcome = vault
+            .seal
+            .init(3, 2, "cleanup-root", &vault.auth, &vault.mfa)
+            .await;
+        assert!(
+            outcome.is_err(),
+            "cleanup must report failure when it cannot scope the delete"
+        );
+        assert!(
+            storage
+                .get_by_path(ROOT_KEY_PATH)
+                .await
+                .expect("storage")
+                .is_some(),
+            "the record owned by another attempt must not be removed by an unscoped delete"
+        );
+        assert_eq!(
+            storage
+                .get_by_path(ROOT_KEY_PATH)
+                .await
+                .expect("storage")
+                .and_then(|e| e.owner_token().map(str::to_string))
+                .as_deref(),
+            Some("another-attempt"),
+            "the foreign owner token must be intact"
+        );
+        assert!(
+            storage
+                .get_by_path(INIT_STAGING_PATH)
+                .await
+                .expect("storage")
+                .is_some(),
+            "the staging marker must be kept so the cleanup can be retried"
         );
     }
 

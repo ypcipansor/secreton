@@ -5,10 +5,13 @@
 //! file in the file backend. Enumerating by stored key reported both, so a rewritten secret
 //! appeared twice, a `count` grew on every update, and the extra row named an id that
 //! `get_by_id` could not reach. A backend that keeps a secondary record must hide it from
-//! enumeration, while the record it superseded stays readable by its own id.
+//! enumeration.
 //!
-//! Memory is included deliberately as the control: it is keyed by path, so it never had the
-//! second record and must keep passing.
+//! The two backends then diverge on the superseded id, and each is asserted to its own
+//! contract. The file backend keys by id, so the superseded record keeps its file and stays
+//! readable by its own id. The memory backend is keyed by path: the replacement took the
+//! path's only slot, so the memory backend and its cache wrapper must report the superseded
+//! id as gone — resolving it through the still-mapped path to the *replacement* was the bug.
 use std::sync::Arc;
 
 use secreton_storage::cache::{CachedStorage, InMemoryCache};
@@ -39,7 +42,25 @@ async fn write_fresh(
     e.id
 }
 
-async fn assert_path_enumerates_once(backend: &(dyn StorageBackend + Send + Sync)) {
+/// How a backend keys a superseded record, once a fresh id has replaced it at `path`.
+///
+/// This is the one place the backends legitimately differ. The file backend stores one file
+/// per id, so the record it superseded keeps its own file and is still readable by its id.
+/// The memory backend is keyed by path: the replacement took the path's single slot, so the
+/// superseded id names nothing at all — and it must report exactly that, rather than
+/// resolving through the still-mapped path to the *replacement* record.
+#[derive(Clone, Copy)]
+enum SupersededId {
+    /// `get_by_id(old_id)` is a cache/backend miss.
+    Retired,
+    /// `get_by_id(old_id)` still yields the original record, under its own id.
+    Retained,
+}
+
+async fn assert_path_enumerates_once(
+    backend: &(dyn StorageBackend + Send + Sync),
+    superseded: SupersededId,
+) {
     let path = "kv/rewritten";
     let old_id = write_fresh(backend, path, b"v1").await;
     let new_id = write_fresh(backend, path, b"v2").await;
@@ -82,26 +103,37 @@ async fn assert_path_enumerates_once(backend: &(dyn StorageBackend + Send + Sync
         .expect("the current record is present");
     assert_eq!(resolved.id, listed[0].id);
 
-    // The superseded record is still reachable by its own id, as the older version's identity
-    // is not the path's identity.
+    // The point of the find: a read by the superseded id must never hand back the record that
+    // replaced it. That is the bug the memory backend had — its `id_index` still mapped the
+    // old id to the path, which the replacement now occupied.
     let old = backend.get_by_id(old_id).await.expect("read old id");
     assert!(
-        old.is_some(),
-        "the superseded record is stored under its own id and must remain readable by it"
+        old.as_ref().is_none_or(|e| e.id == old_id),
+        "`get_by_id(old_id)` must never resolve through the path to the replacement record"
     );
+    match superseded {
+        SupersededId::Retired => assert!(
+            old.is_none(),
+            "the superseded id must be retired, but a record was returned"
+        ),
+        SupersededId::Retained => assert!(
+            old.is_some(),
+            "the superseded record is stored under its own id and must remain readable"
+        ),
+    }
 }
 
 #[tokio::test]
 async fn file_backend_enumerates_a_rewritten_path_once() {
     let dir = tempfile::tempdir().expect("temp dir");
     let backend = FileBackend::new(dir.path().to_str().expect("utf8 path")).expect("file backend");
-    assert_path_enumerates_once(&backend).await;
+    assert_path_enumerates_once(&backend, SupersededId::Retained).await;
 }
 
 #[tokio::test]
 async fn memory_backend_enumerates_a_rewritten_path_once() {
     let backend = MemoryBackend::new();
-    assert_path_enumerates_once(&backend).await;
+    assert_path_enumerates_once(&backend, SupersededId::Retired).await;
 }
 
 #[tokio::test]
@@ -111,7 +143,7 @@ async fn cache_wrapper_enumerates_a_rewritten_path_once() {
         InMemoryCache::new(),
         std::time::Duration::from_secs(60),
     ));
-    assert_path_enumerates_once(storage.as_ref()).await;
+    assert_path_enumerates_once(storage.as_ref(), SupersededId::Retired).await;
 }
 
 /// `compare_and_set` replaces a record in place, so a conditional rewrite must not leave a

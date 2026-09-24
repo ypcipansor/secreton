@@ -26,6 +26,7 @@ import { createRequire } from "node:module";
 import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
+import { MIN_TARGET_PX, measureLayout, undersizedTargets } from "./layout.mjs";
 
 const require = createRequire(import.meta.url);
 const REPO = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
@@ -60,15 +61,17 @@ const results = [];
 // denial path is held to exactly the same standard as the others: an overflow or an
 // undersized control that only appears once the error alert renders must fail the run just
 // as it would on a healthy view.
+//
+// The threshold and the inline-link exemption live in `./layout.mjs`, where the threshold
+// test exercises them without a browser.
 async function probeLayout(page) {
-  return page.evaluate(() => {
-    const text = (document.body.innerText || "").trim();
-    const de = document.documentElement;
-    const tiny = [...document.querySelectorAll("button, a, input")]
-      .map((e) => e.getBoundingClientRect())
-      .filter((r) => r.width > 0 && r.height > 0 && (r.width < 8 || r.height < 8));
-    return { text, overflowX: de.scrollWidth - de.clientWidth, tinyControls: tiny.length };
-  });
+  const measured = await measureLayout(page);
+  const tiny = undersizedTargets(measured.controls);
+  return {
+    text: measured.text,
+    overflowX: measured.overflowX,
+    tinyControls: tiny,
+  };
 }
 
 async function shoot(page, name, urlPath, expectedStatus) {
@@ -102,7 +105,7 @@ async function shoot(page, name, urlPath, expectedStatus) {
     expectedStatus,
     bytes: fs.statSync(file).size,
     overflowX: probe.overflowX,
-    tinyControls: probe.tinyControls,
+    tinyTargets: probe.tinyControls,
     jsErrors: errors,
     textLength: probe.text.length,
   });
@@ -197,7 +200,7 @@ async function main() {
     expectedStatus: 200,
     bytes: fs.statSync(errFile).size,
     overflowX: errProbe.overflowX,
-    tinyControls: errProbe.tinyControls,
+    tinyTargets: errProbe.tinyControls,
     jsErrors: denialErrors,
     alertText,
     textLength: errProbe.text.length,
@@ -251,7 +254,7 @@ async function main() {
       r.bytes < 5000 ||
       r.textLength < 20 ||
       r.overflowX > 2 ||
-      r.tinyControls > 0 ||
+      r.tinyTargets.length > 0 ||
       r.jsErrors.filter((e) => !expectedError(r, e)).length ||
       // A rejected sign-in must not distinguish "no such user" from "wrong password".
       (r.view === "login-error" && r.alertText !== "invalid credentials")
@@ -262,7 +265,10 @@ async function main() {
     console.error(JSON.stringify(bad, null, 2));
     process.exit(1);
   }
-  console.log(`\nOK: ${results.length} views captured and verified`);
+  console.log(
+    `\nOK: ${results.length} views captured and verified ` +
+      `(clickable targets >= ${MIN_TARGET_PX}px, inline text links exempt)`
+  );
 }
 
 main().catch((e) => {

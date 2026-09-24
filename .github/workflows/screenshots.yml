@@ -81,9 +81,23 @@ jobs:
       - run: npm ci
       - run: npm run browser:install
       - run: npm run screenshots:check
+      # The layout rule the capture applies, tested without a browser. It pins the minimum
+      # target size and reads `layout.rs` to prove the sign-out control stays above it, so
+      # a regression there fails here in seconds instead of depending on a capture run.
+      - run: npm run test:screenshots
 
       - name: Build server + wasm bundle
-        run: cargo leptos build --release
+        # cargo-leptos 0.3.7 has no `--locked` flag of its own (`cargo leptos build --help`
+        # lists `--bin-cargo-args`/`--lib-cargo-args`, not `--locked`), but it forwards both
+        # to the `cargo` invocations it makes. Passing `--locked` through them keeps the
+        # build on the committed `Cargo.lock`, so a build in CI cannot silently resolve a
+        # different dependency set than the one the other jobs verified. The preflight below
+        # makes a lockfile that would need updating a hard failure before the build starts,
+        # rather than a `--locked` error twelve minutes in.
+        run: |
+          set -euo pipefail
+          cargo metadata --locked --format-version 1 > /dev/null
+          cargo leptos build --release --bin-cargo-args=--locked --lib-cargo-args=--locked
 
       # `cargo leptos serve --release` reuses the release bundle built above and serves on
       # :3000. Without `--release` it rebuilds the whole workspace in the debug profile,

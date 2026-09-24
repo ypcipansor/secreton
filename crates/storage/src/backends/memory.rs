@@ -48,8 +48,18 @@ impl StorageBackend for MemoryBackend {
         let mut data = self.data.write();
         let mut id_index = self.id_index.write();
 
-        data.insert(entry.path.clone(), entry.clone());
+        // A `store` at a path that already holds a record is a replacement. The old id stops
+        // being reachable through that path, so leaving its index entry behind would keep
+        // `get_by_id(old_id)` resolving to the *replacement* record — the path is still
+        // mapped, the id is not — and `delete_by_id(old_id)` would then delete the record
+        // that replaced it. Drop the stale mapping in the same critical section.
+        if let Some(old_id) = data.get(&entry.path).map(|old| old.id)
+            && old_id != entry.id
+        {
+            id_index.remove(&old_id);
+        }
         id_index.insert(entry.id, entry.path.clone());
+        data.insert(entry.path.clone(), entry.clone());
 
         Ok(())
     }
@@ -77,15 +87,24 @@ impl StorageBackend for MemoryBackend {
 
     async fn update(&self, entry: &SecretEntry) -> StorageResult<()> {
         let mut data = self.data.write();
-        if data.contains_key(&entry.path) {
-            data.insert(entry.path.clone(), entry.clone());
-            Ok(())
-        } else {
-            Err(StorageError::NotFound {
+        let Some(existing) = data.get(&entry.path).map(|existing| existing.id) else {
+            return Err(StorageError::NotFound {
                 resource_type: "SecretEntry".to_string(),
                 id: entry.id.to_string(),
-            })
+            });
+        };
+        let mut id_index = self.id_index.write();
+        // Keep the index consistent with the record being written. `upsert` preserves the
+        // id, so the common case changes nothing; a caller that did supply a different id
+        // must not leave the old id resolving through this path to the new record, or
+        // `get_by_id(old_id)` would report the wrong record and `delete_by_id(old_id)`
+        // would remove it.
+        if existing != entry.id {
+            id_index.remove(&existing);
         }
+        id_index.insert(entry.id, entry.path.clone());
+        data.insert(entry.path.clone(), entry.clone());
+        Ok(())
     }
 
     async fn delete_by_id(&self, id: Uuid) -> StorageResult<bool> {
@@ -208,31 +227,17 @@ impl StorageBackend for MemoryBackend {
 
     async fn list(&self, params: &QueryParams) -> StorageResult<Vec<SecretEntry>> {
         let data = self.data.read();
-        let mut results: Vec<SecretEntry> = data
-            .values()
-            .filter(|entry| {
-                // Simple filtering logic
-                if let Some(prefix) = &params.path_prefix
-                    && !entry.path.starts_with(prefix)
-                {
-                    return false;
-                }
-                if let Some(owner) = params.owner_id
-                    && entry.owner_id != owner
-                {
-                    return false;
-                }
-                !entry.is_expired() || params.include_expired
-            })
-            .cloned()
-            .collect();
-
-        // Apply limit
-        if let Some(limit) = params.limit {
-            results.truncate(limit as usize);
-        }
-
-        Ok(results)
+        // Delegate the whole query contract to `QueryParams::apply_to` rather than
+        // re-implementing a subset. The previous hand-rolled filter honoured only
+        // `path_prefix`, `owner_id`, `include_expired` and `limit`, so `excluded_path_prefixes`,
+        // `security_level`, tags, metadata filters, `sort_by`/`sort_order` and `offset` were
+        // silently dropped. That is not merely an incomplete listing: the lifecycle sweep
+        // passes `excluded_path_prefixes` for reserved namespaces *and* a `limit` while sorting
+        // by `expires_at`, so with reserved entries counted and the ordering ignored the
+        // `limit` truncated live records before the expired ones, and expired user secrets were
+        // never swept.
+        let entries: Vec<SecretEntry> = data.values().cloned().collect();
+        Ok(params.apply_to(entries))
     }
 
     async fn count(&self, params: &QueryParams) -> StorageResult<u64> {
@@ -510,6 +515,118 @@ mod tests {
         assert!(backend.delete_by_path("kv/app/gone").await.unwrap());
         assert!(backend.get_by_id(e.id).await.unwrap().is_none());
         assert!(!backend.delete_by_path("kv/app/gone").await.unwrap());
+    }
+
+    #[tokio::test]
+    async fn storing_a_new_id_at_an_existing_path_retires_the_old_id() {
+        // Regression: `store` overwrote the path but left the previous id in `id_index`.
+        // The stale mapping still pointed at the path, and the path now held the replacement,
+        // so `get_by_id(old_id)` handed back the *replacement* record and
+        // `delete_by_id(old_id)` deleted it — a caller holding the old handle could destroy
+        // the record that superseded it.
+        let backend = MemoryBackend::new();
+
+        let old = entry("kv/app/current");
+        backend.store(&old).await.unwrap();
+
+        let replacement = entry("kv/app/current");
+        assert_ne!(
+            replacement.id, old.id,
+            "ids must differ or this proves nothing"
+        );
+        backend.store(&replacement).await.unwrap();
+
+        assert!(
+            backend.get_by_id(old.id).await.unwrap().is_none(),
+            "the superseded id must no longer resolve"
+        );
+        assert_eq!(
+            backend.get_by_id(replacement.id).await.unwrap().unwrap().id,
+            replacement.id
+        );
+
+        assert!(
+            !backend.delete_by_id(old.id).await.unwrap(),
+            "deleting by the superseded id must report nothing removed"
+        );
+        assert!(
+            backend
+                .get_by_path("kv/app/current")
+                .await
+                .unwrap()
+                .is_some(),
+            "the replacement record must survive a delete of the superseded id"
+        );
+    }
+
+    #[tokio::test]
+    async fn updating_with_a_new_id_keeps_the_index_consistent() {
+        // Regression partner to the `store` case: `update` wrote the caller's record but
+        // never touched `id_index`. A caller that supplied a different id left the old
+        // mapping in place, so `get_by_id(old_id)` resolved through the path to the new
+        // record and `delete_by_id(old_id)` removed it.
+        let backend = MemoryBackend::new();
+
+        let original = entry("kv/app/edit");
+        backend.store(&original).await.unwrap();
+
+        let mut edited = entry("kv/app/edit");
+        edited.id = Uuid::new_v4();
+        backend.update(&edited).await.unwrap();
+
+        assert!(
+            backend.get_by_id(original.id).await.unwrap().is_none(),
+            "the retired id must not resolve to the edited record"
+        );
+        assert_eq!(
+            backend.get_by_id(edited.id).await.unwrap().unwrap().id,
+            edited.id
+        );
+        assert!(
+            !backend.delete_by_id(original.id).await.unwrap(),
+            "deleting by the retired id must remove nothing"
+        );
+        assert!(
+            backend.get_by_path("kv/app/edit").await.unwrap().is_some(),
+            "the edited record must survive"
+        );
+    }
+
+    #[tokio::test]
+    async fn reserved_entries_do_not_hide_an_expired_secret_from_the_lifecycle_query() {
+        // Regression: `list` honoured only `path_prefix`, `owner_id`, `include_expired` and
+        // `limit`. It ignored `excluded_path_prefixes` and the `expires_at` ordering, so with
+        // enough reserved entries — which never expire and were counted against the limit —
+        // an expired user secret never appeared in the sweep's page and was never deleted.
+        use chrono::Duration;
+
+        let backend = MemoryBackend::new();
+        // More reserved entries than the limit: the old code truncated them into the page
+        // and pushed the expired secret out.
+        for i in 0..5 {
+            let e = entry(&format!("sys/reserved/{i}"));
+            backend.store(&e).await.unwrap();
+        }
+        let mut expired = entry("apps/expired");
+        expired.expires_at = Some(Utc::now() - Duration::hours(1));
+        backend.store(&expired).await.unwrap();
+
+        let params = QueryParams {
+            include_expired: true,
+            limit: Some(2),
+            sort_by: Some("expires_at".to_string()),
+            sort_order: Some("asc".to_string()),
+            excluded_path_prefixes: vec!["sys/".to_string()],
+            ..Default::default()
+        };
+
+        let listed = backend.list(&params).await.unwrap();
+        assert!(
+            listed.iter().any(|e| e.id == expired.id),
+            "the expired secret must survive the limit once reserved entries are excluded; \
+             got {:?}",
+            listed.iter().map(|e| e.path.as_str()).collect::<Vec<_>>()
+        );
     }
 
     #[tokio::test]
