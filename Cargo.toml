@@ -193,7 +193,7 @@ deadpool-postgres = "0.14"
 mysql_async = { version = "0.36", default-features = false, features = [
     "default-rustls",
 ] }
-redis = { version = "0.32", features = ["tokio-comp", "connection-manager"] }
+redis = { version = "1.7", features = ["tokio-comp", "connection-manager"] }
 
 # ---- Config / CLI ----------------------------------------------------------
 config = { version = "0.15", default-features = false, features = ["toml"] }
