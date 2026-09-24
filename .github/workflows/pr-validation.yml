@@ -19,7 +19,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: Checkout repository
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
         with:
           fetch-depth: 0
 
@@ -162,7 +162,7 @@ jobs:
           fi
 
       - name: Add PR comment with validation results
-        uses: actions/github-script@v8
+        uses: actions/github-script@v9
         with:
           script: |
             const prSize = '${{ steps.pr_size.outputs.size }}';
