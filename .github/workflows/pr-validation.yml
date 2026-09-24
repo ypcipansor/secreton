@@ -29,7 +29,12 @@ jobs:
         # requests only ever produced a red check nobody could act on. Dependabot's
         # titles are already machine-generated and reviewed by the dependency review
         # instead; the format check applies to hand-written titles.
-        if: ${{ github.actor != 'dependabot[bot]' }}
+        #
+        # Keyed on the PR *author*, not on `github.actor`: `actor` is whoever triggered
+        # the run, so a push to a dependabot branch by anyone else (a rebase, a
+        # Dependabot-rebase, an infra fix) made the exemption lapse and the red check
+        # came back. The author is fixed for the life of the pull request.
+        if: ${{ github.event.pull_request.user.login != 'dependabot[bot]' }}
         uses: amannn/action-semantic-pull-request@v6
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
