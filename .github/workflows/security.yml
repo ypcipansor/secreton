@@ -56,22 +56,25 @@ jobs:
     runs-on: ubuntu-latest
     permissions:
       contents: read
+      # gitleaks lists the pull request's commits to scan only what changed. Without
+      # this the call returns 403 "Resource not accessible by integration" and the
+      # job dies on an unhandled rejection.
+      pull-requests: read
     steps:
       - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
         with:
-          # The scan walks a commit range, so the range's far end has to be present.
+          # Full history: `gitleaks git` walks every commit, so a credential that was
+          # committed and later deleted is still found. A shallow clone would miss it.
           fetch-depth: 0
-      # gitleaks-action left this job red on every run, on this branch and on `main`
-      # alike: since v2 it refuses to scan a repository owned by an organization
-      # without a GITLEAKS_LICENSE issued by gitleaks.io, and this repository belongs
-      # to one. It exited before reading a single line of the tree. The scanner itself
-      # is MIT-licensed and needs no key — the key gates the wrapper action only — so
-      # the released binary is run directly here.
+      # The gitleaks *action* now demands GITLEAKS_LICENSE for organisation accounts
+      # and fails with "missing gitleaks license" before scanning a single byte. The
+      # CLI is MIT-licensed and needs no key, so it is downloaded here instead. The
+      # version is pinned and the archive hash checked, so a compromised or retagged
+      # release cannot execute in a workflow holding this repository's token.
       #
-      # Pinned by version and verified by sha256. The action was pinned to a release
-      # SHA for the same reason: an upstream compromise must not execute in a
-      # workflow holding this repository's token, and a checksum cannot be rewritten
-      # under a tag the way a release asset can.
+      # The allowlist in .gitleaks.toml names the exact placeholder strings that the
+      # `generic-api-key` and `private-key` rules flag in test fixtures; it extends the
+      # default rules rather than replacing them.
       - name: Install gitleaks
         env:
           GITLEAKS_VERSION: 8.30.1
@@ -81,46 +84,10 @@ jobs:
           curl -fsSL -o /tmp/gitleaks.tar.gz \
             "https://github.com/gitleaks/gitleaks/releases/download/v${GITLEAKS_VERSION}/gitleaks_${GITLEAKS_VERSION}_linux_x64.tar.gz"
           echo "${GITLEAKS_SHA256}  /tmp/gitleaks.tar.gz" | sha256sum -c -
-          mkdir -p "$HOME/.local/bin"
-          tar -xzf /tmp/gitleaks.tar.gz -C "$HOME/.local/bin" gitleaks
-          "$HOME/.local/bin/gitleaks" version
-          echo "$HOME/.local/bin" >> "$GITHUB_PATH"
-      # A pull request or a push is judged on the commits it adds. Walking the whole
-      # history instead would re-report the fabricated keys in docs and fixtures that
-      # this repository's history carries, which reach nothing now and which nobody can
-      # rotate. `--no-merges` keeps the synthetic `refs/pull/<n>/merge` commit that
-      # checkout leaves HEAD on out of the scan, so a finding is reported once, not twice.
-      #
-      # The event payload reaches the shell through the environment, never through
-      # `${{ }}` interpolation: `github.event.before` is repository-controlled for
-      # pushes, but interpolating a payload value into a script is the injection the
-      # PR-validation workflow already had to fix.
-      - name: Scan commits under test
-        if: github.event_name == 'pull_request' || github.event_name == 'push'
-        env:
-          BASE_REF: ${{ github.base_ref }}
-          BEFORE: ${{ github.event.before }}
-          AFTER: ${{ github.event.after }}
-        run: |
-          set -euo pipefail
-          if [ "${GITHUB_EVENT_NAME}" = "pull_request" ]; then
-            range="origin/${BASE_REF}..HEAD"
-          elif [ -n "${BEFORE}" ] && [ "${BEFORE}" != "0000000000000000000000000000000000000000" ]; then
-            range="${BEFORE}..${AFTER}"
-          else
-            # A branch's first push reports an all-zero `before`: no parent to diff.
-            range="-1"
-          fi
-          gitleaks git --no-banner --redact --exit-code 1 \
-            --log-opts="--no-merges ${range}"
-
-      # The nightly run exists to catch a secret that landed without a pull request.
-      # There is no commit range to judge it against, so it reads the tree as it stands
-      # — which is also the only thing a reader can still act on. Acknowledged
-      # false positives live in `.gitleaksignore`.
-      - name: Scan the tree
-        if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'
-        run: gitleaks dir . --no-banner --redact --exit-code 1
+          tar -xzf /tmp/gitleaks.tar.gz -C /tmp gitleaks
+          /tmp/gitleaks version
+      - name: Scan the repository history
+        run: /tmp/gitleaks git --redact --no-banner --config .gitleaks.toml .
 
   vulnerabilities:
     name: Trivy filesystem scan

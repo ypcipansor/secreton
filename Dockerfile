@@ -25,20 +25,22 @@
 # which lacks FindBin, so OpenSSL's ./Configure aborts on line 15 and
 # `cargo install cargo-leptos` fails outright — this image could not be built
 # without them.
-#
-# cargo-leptos is pinned to 0.3.7 rather than taking the latest. 0.3.8 and 0.3.9
-# require `wasm_split_cli_support ^0.2.3`, whose `reloc.rs` uses `if let` guards in
-# match arms — still unstable on the 1.94.1 toolchain pinned here, so `--locked`
-# fails with E0658 and the image never builds. 0.3.7's published lockfile resolves
-# `wasm_split_cli_support` 0.2.2, which compiles on 1.94.1. Revisit once the
-# toolchain moves past the feature gate or wasm_split ships a fix.
-FROM rust:1.94.1-slim-bookworm AS chef
+# `cargo install cargo-leptos` here compiles with the *base image's* rustc, not the
+# one rust-toolchain.toml pins: the chef stage below never copies the source tree, so
+# rustup has not yet seen the pin when this line runs. The two must therefore be kept
+# in step with the minimum rustc cargo-leptos's dependency tree needs — current
+# releases already require more than 1.94.1 (wasm_split_cli_support uses `if let`
+# guards, stable only in newer compilers), and the failure surfaced as
+# "error[E0658]: `if let` guards are experimental" while compiling cargo-leptos.
+# The builder stage still compiles the application itself with the rust-toolchain.toml
+# channel, which it downloads via rustup once the source is copied in.
+FROM rust:1.98.0-slim-bookworm AS chef
 WORKDIR /app
 RUN apt-get update \
  && apt-get install -y --no-install-recommends perl make pkg-config cmake g++ \
  && rm -rf /var/lib/apt/lists/*
 RUN cargo install cargo-chef --locked \
- && cargo install cargo-leptos --locked --version 0.3.7 \
+ && cargo install cargo-leptos --locked \
  && rustup target add wasm32-unknown-unknown
 
 FROM chef AS planner
