@@ -181,10 +181,12 @@ mutex dalam proses adalah jaminan lengkapnya karena tidak ada replika kedua yang
 berbagi backend itu.
 
 Semua backend `CrossProcess` memakai compare-and-set yang benar-benar atomik: PostgreSQL
-memakai `ON CONFLICT ... DO UPDATE ... WHERE` dalam satu statement (dan `store_fenced`
-memakai `INSERT ... WHERE EXISTS` pada record lease dengan `WHERE EXISTS` yang sama di arm
-konflik), Redis memakai satu skrip Lua untuk operasi maupun fence, dan file memakai OS
-advisory lock serta rename atomik. Tidak ada implementasi
+memakai `ON CONFLICT ... DO UPDATE ... WHERE` dalam satu statement, dan `store_fenced`
+memakai CTE `fence` yang men-`SELECT` record lease dengan `FOR SHARE` sehingga baris lease
+terkunci selama statement berjalan — fence dan penulisan artefak menjadi satu langkah tak
+terbagi, dan takeover yang sedang berjalan (belum commit) memblokir penulisan basi alih-alih
+tak terlihat olehnya. Redis memakai satu skrip Lua untuk operasi maupun fence, dan file
+memakai OS advisory lock serta rename atomik. Tidak ada implementasi
 yang memakai `upsert` read-then-write (yang tidak atomik) sebagai kunci, dan backend yang
 tidak mampu mengembalikan `StorageError::Unsupported` alih-alih kunci palsu — `init`
 memperlakukannya sebagai kegagalan keras.

@@ -473,19 +473,43 @@ impl StorageBackend for RedisBackend {
         };
 
         // KEYS[1]=path key; ARGV[1]=value, ARGV[2]=mode ("absent" | "any" | "owner"),
-        // ARGV[3]=owner token (owner mode only), ARGV[4]=the id the payload was built with.
+        // ARGV[3]=owner token (owner mode only), ARGV[4]=the id the payload was built with,
+        // ARGV[5]=the os.time() at which the record expires, or '' for no expiry.
+        //
+        // The TTL is applied inside the script so both the entry and the path mapping carry
+        // the same absolute deadline. The previous script `SET` the value with no expiry, so a
+        // conditional write silently made an expiring record immortal: the caller asked for a
+        // deadline, the write dropped it, and Redis would then serve a record whose own body
+        // still says `expires_at` has passed. `SETEX`/`PEXPIREAT` closes that. The deadline is
+        // passed as an absolute Unix second so a retry after a "moved" signal cannot shorten
+        // the TTL by the time already spent.
         let script = redis::Script::new(
             r"
             local mode = ARGV[2]
             local mapping = redis.call('GET', KEYS[1])
             local expected = ARGV[4]
+            local expires = ARGV[5]
+
+            local function write(key, value)
+                if expires ~= '' then
+                    local ttl = tonumber(expires) - tonumber(redis.call('TIME')[1])
+                    if ttl <= 0 then
+                        redis.call('DEL', key)
+                        return
+                    end
+                    redis.call('SET', key, value)
+                    redis.call('PEXPIRE', key, ttl * 1000)
+                else
+                    redis.call('SET', key, value)
+                end
+            end
 
             if mode == 'absent' then
                 if mapping then
                     return 0
                 end
-                redis.call('SET', 'secreton:entry:' .. expected, ARGV[1])
-                redis.call('SET', KEYS[1], expected)
+                write('secreton:entry:' .. expected, ARGV[1])
+                write(KEYS[1], expected)
                 return 1
             end
 
@@ -493,8 +517,8 @@ impl StorageBackend for RedisBackend {
                 if mode == 'owner' then
                     return 0
                 end
-                redis.call('SET', 'secreton:entry:' .. expected, ARGV[1])
-                redis.call('SET', KEYS[1], expected)
+                write('secreton:entry:' .. expected, ARGV[1])
+                write(KEYS[1], expected)
                 return 1
             end
 
@@ -520,8 +544,13 @@ impl StorageBackend for RedisBackend {
                 end
             end
 
-            redis.call('SET', 'secreton:entry:' .. expected, ARGV[1])
-            redis.call('SET', KEYS[1], expected)
+            write('secreton:entry:' .. expected, ARGV[1])
+            write(KEYS[1], expected)
+            -- A replacement whose identity moved off the old id leaves that id's record
+            -- behind; drop it so a superseded record cannot outlive the path that named it.
+            if mapping ~= expected then
+                redis.call('DEL', 'secreton:entry:' .. mapping)
+            end
             return 1
             ",
         );
@@ -547,6 +576,13 @@ impl StorageBackend for RedisBackend {
             #[cfg(test)]
             self.take_pause().await;
 
+            // Absolute Unix-second deadline, so the entry and its mapping expire together and
+            // a retry after a "moved" signal cannot shorten the TTL by the elapsed time.
+            let expires_at = to_write
+                .expires_at
+                .map(|at| at.timestamp().to_string())
+                .unwrap_or_default();
+
             let outcome: i64 = {
                 let mut conn = self.manager.lock().await;
                 script
@@ -555,6 +591,7 @@ impl StorageBackend for RedisBackend {
                     .arg(mode)
                     .arg(expected_owner.as_deref().unwrap_or_default())
                     .arg(to_write.id.to_string())
+                    .arg(&expires_at)
                     .invoke_async(&mut *conn)
                     .await
                     .map_err(|e| StorageError::QueryFailed {
@@ -633,7 +670,13 @@ impl StorageBackend for RedisBackend {
     /// winner's returned shares stop opening the stored root key.
     ///
     /// `KEYS[1]`=fence path key, `KEYS[2]`=artifact path key.
-    /// `ARGV[1]`=fence token, `ARGV[2]`=artifact value, `ARGV[3]`=artifact write id.
+    /// `ARGV[1]`=fence token, `ARGV[2]`=artifact value, `ARGV[3]`=artifact write id,
+    /// `ARGV[4]`=artifact absolute expiry (Unix seconds) or `''` for none.
+    ///
+    /// The expiry is applied in the script for the same reason the compare-and-set applies
+    /// it there: a fenced write that `SET` the artifact with no deadline would silently make
+    /// an expiring record immortal, and Redis would then serve a record whose body already
+    /// says it expired.
     async fn store_fenced(
         &self,
         entry: &SecretEntry,
@@ -662,6 +705,21 @@ impl StorageBackend for RedisBackend {
                 return 0
             end
 
+            local expires = ARGV[4]
+            local function write(key, value)
+                if expires ~= '' then
+                    local ttl = tonumber(expires) - tonumber(redis.call('TIME')[1])
+                    if ttl <= 0 then
+                        redis.call('DEL', key)
+                        return
+                    end
+                    redis.call('SET', key, value)
+                    redis.call('PEXPIRE', key, ttl * 1000)
+                else
+                    redis.call('SET', key, value)
+                end
+            end
+
             -- The value and the path mapping must name the same id, so the mapping never
             -- resolves to a record whose own id disagrees. A key left by the id this
             -- replaces is removed so the rewrite does not leak it.
@@ -669,11 +727,16 @@ impl StorageBackend for RedisBackend {
             if existing_id and existing_id ~= ARGV[3] then
                 redis.call('DEL', 'secreton:entry:' .. existing_id)
             end
-            redis.call('SET', 'secreton:entry:' .. ARGV[3], ARGV[2])
-            redis.call('SET', KEYS[2], ARGV[3])
+            write('secreton:entry:' .. ARGV[3], ARGV[2])
+            write(KEYS[2], ARGV[3])
             return 1
             ",
         );
+
+        let expires_at = entry
+            .expires_at
+            .map(|at| at.timestamp().to_string())
+            .unwrap_or_default();
 
         let written: i64 = {
             let mut conn = self.manager.lock().await;
@@ -683,6 +746,7 @@ impl StorageBackend for RedisBackend {
                 .arg(fence.token)
                 .arg(&value)
                 .arg(entry.id.to_string())
+                .arg(&expires_at)
                 .invoke_async(&mut *conn)
                 .await
                 .map_err(|e| StorageError::QueryFailed {
@@ -738,7 +802,32 @@ impl StorageBackend for RedisBackend {
             }
         }
 
-        Ok(params.apply_to(entries))
+        // An entry key is only reachable through the path mapping that names it, so an entry
+        // whose path mapping now names a *different* id is superseded: a `store` that wrote a
+        // fresh record at an existing path repoints the mapping but leaves the previous entry
+        // key behind. Enumerating by key alone therefore reports records that `get_by_path`/
+        // `get_by_id` can no longer reach — a deleted secret that `list` still shows, and a
+        // `count` that grows on every update. Keep only the record each path currently
+        // resolves to; entries with no path have no mapping and are kept as they are.
+        let mut current = Vec::with_capacity(entries.len());
+        for entry in entries {
+            if entry.path.is_empty() {
+                current.push(entry);
+                continue;
+            }
+            let path_key = format!("secreton:path:{}", entry.path);
+            let mapped: Option<String> =
+                conn.get(&path_key)
+                    .await
+                    .map_err(|e| StorageError::QueryFailed {
+                        message: format!("Failed to read path mapping during scan: {}", e),
+                    })?;
+            if mapped.as_deref() == Some(entry.id.to_string().as_str()) {
+                current.push(entry);
+            }
+        }
+
+        Ok(params.apply_to(current))
     }
 
     async fn count(&self, params: &QueryParams) -> StorageResult<u64> {

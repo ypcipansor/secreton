@@ -326,53 +326,103 @@ impl FileBackend {
         entries
             .into_iter()
             .filter(|entry| {
-                // Filter by path prefix
-                if let Some(prefix) = &params.path_prefix
-                    && !entry.path.starts_with(prefix)
-                {
-                    return false;
-                }
-
-                // Filter by security level
-                if let Some(min_level) = params.security_level
-                    && entry.security_level < min_level
-                {
-                    return false;
-                }
-
-                // Filter by tags
-                if !params.tags.is_empty() {
-                    let entry_tags: std::collections::HashSet<_> = entry.tags.iter().collect();
-                    let filter_tags: std::collections::HashSet<_> = params.tags.iter().collect();
-                    if !filter_tags.is_subset(&entry_tags) {
-                        return false;
-                    }
-                }
-
-                // Filter by owner
-                if let Some(owner_id) = params.owner_id
-                    && entry.owner_id != owner_id
-                {
-                    return false;
-                }
-
-                // Filter by metadata
-                for (key, value) in &params.metadata_filters {
-                    if let Some(entry_value) = entry.metadata.get(key) {
-                        if entry_value != value {
-                            return false;
-                        }
-                    } else {
-                        return false;
-                    }
-                }
-
-                // Filter expired entries
-                if !params.include_expired && entry.is_expired() {
+                if !Self::entry_matches(entry, params) {
                     return false;
                 }
 
                 true
+            })
+            .collect()
+    }
+
+    /// Whether `entry` passes every predicate in `params`, with no path-collapse applied.
+    fn entry_matches(entry: &SecretEntry, params: &QueryParams) -> bool {
+        // Filter by path prefix
+        if let Some(prefix) = &params.path_prefix
+            && !entry.path.starts_with(prefix)
+        {
+            return false;
+        }
+
+        // Filter by security level
+        if let Some(min_level) = params.security_level
+            && entry.security_level < min_level
+        {
+            return false;
+        }
+
+        // Filter by tags
+        if !params.tags.is_empty() {
+            let entry_tags: std::collections::HashSet<_> = entry.tags.iter().collect();
+            let filter_tags: std::collections::HashSet<_> = params.tags.iter().collect();
+            if !filter_tags.is_subset(&entry_tags) {
+                return false;
+            }
+        }
+
+        // Filter by owner
+        if let Some(owner_id) = params.owner_id
+            && entry.owner_id != owner_id
+        {
+            return false;
+        }
+
+        // Filter by metadata
+        for (key, value) in &params.metadata_filters {
+            if let Some(entry_value) = entry.metadata.get(key) {
+                if entry_value != value {
+                    return false;
+                }
+            } else {
+                return false;
+            }
+        }
+
+        // Filter expired entries
+        if !params.include_expired && entry.is_expired() {
+            return false;
+        }
+
+        true
+    }
+
+    /// Collapse records sharing a path down to the single one a read resolves to.
+    ///
+    /// Entries are files keyed by id, and `store` is last-writer-wins by id, so a write that
+    /// carries a fresh id for an existing path leaves the previous record's file behind.
+    /// An enumeration by file would report both — a rewritten secret shown twice, and a
+    /// `count` that grows on every update — while a read resolves the path to exactly one.
+    /// Both the read and the enumeration now order candidates by `(updated_at, id)` and take
+    /// the first, so they cannot disagree on which record a path names. The tie-break on the
+    /// id exists because two writes can carry the same timestamp; without it the choice would
+    /// depend on directory order and the two operations could still pick differently. A record
+    /// with no path has no mapped identity and is kept as it is.
+    fn collapse_to_current_paths(&self, entries: Vec<SecretEntry>) -> Vec<SecretEntry> {
+        use std::collections::HashMap;
+
+        // The id each path resolves to, by the same ordering as `get_by_path`.
+        let mut current: HashMap<String, (chrono::DateTime<chrono::Utc>, Uuid)> = HashMap::new();
+        for entry in &entries {
+            if entry.path.is_empty() {
+                continue;
+            }
+            let candidate = (entry.updated_at, entry.id);
+            let better = match current.get(&entry.path) {
+                None => true,
+                Some(held) => candidate > *held,
+            };
+            if better {
+                current.insert(entry.path.clone(), candidate);
+            }
+        }
+
+        entries
+            .into_iter()
+            .filter(|entry| {
+                entry.path.is_empty()
+                    || current
+                        .get(&entry.path)
+                        .is_some_and(|(_, id)| *id == entry.id)
             })
             .collect()
     }
@@ -398,14 +448,15 @@ impl StorageBackend for FileBackend {
     }
 
     async fn get_by_path(&self, path: &str) -> StorageResult<Option<SecretEntry>> {
-        // For path-based lookup, we need to scan all entries
+        // A path can have more than one record on disk: `store` is keyed by id, so a rewrite
+        // that carries a fresh id leaves the previous file behind. Resolve by `(updated_at,
+        // id)`, the same ordering `list` collapses with, so a read and an enumeration always
+        // name the same record and neither depends on directory order.
         let entries = self.scan_entries()?;
-        for entry in entries {
-            if entry.path == path {
-                return Ok(Some(entry));
-            }
-        }
-        Ok(None)
+        Ok(entries
+            .into_iter()
+            .filter(|entry| entry.path == path)
+            .max_by(|a, b| (a.updated_at, a.id).cmp(&(b.updated_at, b.id))))
     }
 
     async fn update(&self, entry: &SecretEntry) -> StorageResult<()> {
@@ -546,7 +597,11 @@ impl StorageBackend for FileBackend {
     }
 
     async fn list(&self, params: &QueryParams) -> StorageResult<Vec<SecretEntry>> {
-        let entries = self.scan_entries()?;
+        // Collapse first, so a path with a superseded record is counted and reported once,
+        // then filter, so the surviving record is the one the query predicates are applied
+        // to. Filtering first could discard the current record while an older one at the same
+        // path survived the predicate, and `count` would still disagree with `list`.
+        let entries = self.collapse_to_current_paths(self.scan_entries()?);
         let mut filtered = self.filter_entries(entries, params);
 
         // Apply sorting if specified
@@ -576,7 +631,9 @@ impl StorageBackend for FileBackend {
     }
 
     async fn count(&self, params: &QueryParams) -> StorageResult<u64> {
-        let entries = self.scan_entries()?;
+        // Count exactly what `list` would return, including the path collapse: a superseded
+        // record must not inflate the count any more than it may appear in a listing.
+        let entries = self.collapse_to_current_paths(self.scan_entries()?);
         let filtered = self.filter_entries(entries, params);
         Ok(filtered.len() as u64)
     }

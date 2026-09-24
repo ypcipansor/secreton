@@ -547,17 +547,24 @@ impl StorageBackend for PostgresBackend {
         Ok(rows_affected > 0)
     }
 
-    /// Fenced write as a single statement, so the fence and the write cannot interleave.
+    /// Fenced write as a single statement that **locks the lease row**.
     ///
-    /// The insert is `SELECT ... WHERE EXISTS (<fence row still carries the token>)`, and
-    /// the conflict arm repeats the same `WHERE EXISTS` inside its own update condition.
-    /// PostgreSQL evaluates both against the statement's snapshot, so the fence is read and
-    /// the artifact is written in one indivisible step: a concurrent transaction that takes
-    /// the lease over either commits before this statement (which then sees the other token
-    /// and writes nothing) or after (in which case this statement already committed the write
-    /// while it demonstrably held the lease). There is no window between a read of the lease
-    /// and the write of the artifact for a takeover to slip into, which is exactly the
-    /// window the plain `store` left open.
+    /// The insert is `SELECT ... FROM f`, where `f` is a CTE that selects the lease row only
+    /// while it still carries the token, and `FOR SHARE` makes that select take a row lock.
+    /// The conflict arm repeats the same locked CTE inside its own update condition. Because
+    /// both the fence read and the artifact write are one statement, and the fence read holds
+    /// a lock on the lease row for the statement's duration, a concurrent takeover cannot slip
+    /// between them.
+    ///
+    /// A plain `WHERE EXISTS (SELECT ...)` is **not** enough here, and this is the defect this
+    /// version fixes. `EXISTS` is an unlocked read of the statement's snapshot under READ
+    /// COMMITTED, so it does not serialise with a takeover at all: a takeover transaction that
+    /// has already executed `UPDATE ... SET storage_owner = 'B'` but not yet committed is
+    /// invisible to the snapshot, the `EXISTS` still sees the old `'A'`, and the stale write
+    /// commits — landing *after* the takeover and overwriting the winner's artifact. `FOR
+    /// SHARE` closes that: it blocks on the takeover's row lock, and when the takeover commits
+    /// the lock is re-evaluated against the row's new version, so a token that is no longer
+    /// the lease's owner matches nothing and the write affects zero rows.
     async fn store_fenced(
         &self,
         entry: &SecretEntry,
@@ -595,24 +602,31 @@ impl StorageBackend for PostgresBackend {
                 expires_at = EXCLUDED.expires_at"#;
 
         // $13 = fence path, $14 = fence owner token. The owner key is a compile-time
-        // constant, never interpolated input.
+        // constant, never interpolated input. `FOR SHARE` on the fence CTE is the lock that
+        // makes the fence and the write one indivisible step; it is evaluated for both the
+        // insert arm and the conflict arm.
         let query = format!(
-            "INSERT INTO secreton_entries \
-             (id, path, encrypted_data, encryption_metadata, security_level, metadata, tags, version, owner_id, created_at, updated_at, expires_at) \
-             SELECT $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12 \
-             WHERE EXISTS (SELECT 1 FROM secreton_entries \
-                 WHERE path = $13 AND metadata->>'{owner}' = $14) \
-             ON CONFLICT (path) DO UPDATE SET{update_set} \
-             WHERE EXISTS (SELECT 1 FROM secreton_entries \
-                 WHERE path = $13 AND metadata->>'{owner}' = $14)",
+            "WITH fence AS ( \
+                 SELECT 1 FROM secreton_entries \
+                 WHERE path = $13 AND metadata->>'{owner}' = $14 \
+                 FOR SHARE \
+             ), written AS ( \
+                 INSERT INTO secreton_entries \
+                 (id, path, encrypted_data, encryption_metadata, security_level, metadata, tags, version, owner_id, created_at, updated_at, expires_at) \
+                 SELECT $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12 FROM fence \
+                 ON CONFLICT (path) DO UPDATE SET{update_set} \
+                 WHERE EXISTS (SELECT 1 FROM fence) \
+                 RETURNING 1 \
+             ) \
+             SELECT COUNT(*)::bigint FROM written",
             owner = crate::OWNER_TOKEN_KEY
         );
 
         let security_level = entry.security_level as i32;
         let version = entry.version as i32;
 
-        let rows_affected = client
-            .execute(
+        let row = client
+            .query_one(
                 &query,
                 &[
                     &entry.id,
@@ -636,7 +650,8 @@ impl StorageBackend for PostgresBackend {
                 message: format!("Failed to fenced-store secreton entry: {}", e),
             })?;
 
-        Ok(rows_affected > 0)
+        let written: i64 = row.get(0);
+        Ok(written > 0)
     }
 
     async fn count(&self, params: &QueryParams) -> StorageResult<u64> {

@@ -647,3 +647,184 @@ async fn mfa_service(
         Arc::new(DefaultRecoveryCodeService::new()),
     ))
 }
+
+/// Regression: a conditional write must honour the record's expiry.
+///
+/// The Redis `compare_and_set` script used a bare `SET` for both the entry and the path
+/// mapping, so a conditional write that carried an `expires_at` stored a record with **no**
+/// TTL at all. Redis then served a record whose own body already said it had expired, and the
+/// only thing that could ever remove it was the application-level lifecycle sweep — which is
+/// not guaranteed to run and is a no-op on this backend's `delete_expired`. The fix applies
+/// the deadline inside the script, dropping a record whose deadline has already passed.
+///
+/// The property, asserted with no sleep and no clock dependency: a conditional write of a
+/// record whose `expires_at` is already past must leave the path unreachable. The pre-fix
+/// `SET` stored it unconditionally, so `get_by_path` returned it.
+#[tokio::test]
+async fn redis_conditional_write_honours_an_elapsed_expiry() {
+    use chrono::{Duration, Utc};
+
+    let Some(url) = redis_url() else {
+        return;
+    };
+    let backend = RedisBackend::new(&url).await.expect("connect");
+    let storage: Arc<NamespacedRedis> = Arc::new(NamespacedRedis {
+        inner: backend,
+        prefix: format!("it/{}", uuid::Uuid::new_v4()),
+    });
+
+    let path = "contract/expired";
+    let mut entry = SecretEntry::new(
+        path.to_string(),
+        b"payload".to_vec(),
+        secreton_storage::EncryptionMetadata::default(),
+        SecurityLevel::Internal,
+        uuid::Uuid::nil(),
+    )
+    .owned_by("a");
+    entry.expires_at = Some(Utc::now() - Duration::hours(1));
+
+    storage
+        .compare_and_set(&entry, Expect::Absent)
+        .await
+        .expect("insert-if-absent with an elapsed expiry");
+
+    assert!(
+        storage.get_by_path(path).await.expect("read").is_none(),
+        "a record whose expiry has already elapsed must not be reachable; the pre-fix \
+         bare `SET` made it immortal"
+    );
+}
+
+/// Regression: a fenced write must honour the record's expiry, exactly like the conditional
+/// write. The pre-fix `store_fenced` script used a bare `SET` with no TTL, so an
+/// initialization artifact written with an elapsed deadline was still served.
+#[tokio::test]
+async fn redis_fenced_write_honours_an_elapsed_expiry() {
+    use chrono::{Duration, Utc};
+
+    let Some(url) = redis_url() else {
+        return;
+    };
+    let backend = RedisBackend::new(&url).await.expect("connect");
+    let storage: Arc<NamespacedRedis> = Arc::new(NamespacedRedis {
+        inner: backend,
+        prefix: format!("it/{}", uuid::Uuid::new_v4()),
+    });
+
+    let lease = "sys/init_lease";
+    let artifact = "sys/root_key_enc";
+    storage
+        .store(
+            &SecretEntry::new(
+                lease.to_string(),
+                b"lease".to_vec(),
+                secreton_storage::EncryptionMetadata::default(),
+                SecurityLevel::Internal,
+                uuid::Uuid::nil(),
+            )
+            .owned_by("holder"),
+        )
+        .await
+        .expect("store lease");
+
+    let mut artifact_entry = SecretEntry::new(
+        artifact.to_string(),
+        b"payload".to_vec(),
+        secreton_storage::EncryptionMetadata::default(),
+        SecurityLevel::Internal,
+        uuid::Uuid::nil(),
+    )
+    .owned_by("holder");
+    artifact_entry.expires_at = Some(Utc::now() - Duration::hours(1));
+
+    storage
+        .store_fenced(
+            &artifact_entry,
+            secreton_storage::StorageFence::new(lease, "holder"),
+        )
+        .await
+        .expect("fenced write with an elapsed expiry");
+
+    assert!(
+        storage.get_by_path(artifact).await.expect("read").is_none(),
+        "a fenced artifact whose expiry has elapsed must not be reachable; the pre-fix bare \
+         `SET` made it immortal"
+    );
+}
+
+/// Regression: a superseded record must not be enumerated.
+///
+/// Redis stores entries keyed by id with a separate path→id mapping. A `store` that writes a
+/// fresh record at an existing path repoints the mapping but leaves the previous entry key
+/// behind. `list` scanned `secreton:entry:*` and returned every key, so an updated secret
+/// appeared twice — and a secret whose mapping was gone but whose entry key survived kept
+/// showing up — while `get_by_path`/`get_by_id` could not reach either. `count` grew on
+/// every update.
+///
+/// The property: `list` returns only the record each path currently resolves to.
+#[tokio::test]
+async fn redis_list_does_not_report_superseded_records() {
+    let Some(url) = redis_url() else {
+        return;
+    };
+    let backend = RedisBackend::new(&url).await.expect("connect");
+    let storage: Arc<NamespacedRedis> = Arc::new(NamespacedRedis {
+        inner: backend,
+        prefix: format!("it/{}", uuid::Uuid::new_v4()),
+    });
+
+    let path = "contract/updated";
+    let first = SecretEntry::new(
+        path.to_string(),
+        b"v1".to_vec(),
+        secreton_storage::EncryptionMetadata::default(),
+        SecurityLevel::Internal,
+        uuid::Uuid::nil(),
+    );
+    storage.store(&first).await.expect("store v1");
+
+    // A second write at the same path with a *different* id — what an update through `store`
+    // produces. The old entry key stays behind with no mapping pointing at it.
+    let second = SecretEntry::new(
+        path.to_string(),
+        b"v2".to_vec(),
+        secreton_storage::EncryptionMetadata::default(),
+        SecurityLevel::Internal,
+        uuid::Uuid::nil(),
+    );
+    assert_ne!(
+        first.id, second.id,
+        "the two writes must be distinct records"
+    );
+    storage.store(&second).await.expect("store v2");
+
+    // `list` scoped to this path's prefix must report the current record only. The pre-fix
+    // scan-key-only implementation returned both.
+    let listed = storage
+        .list(&secreton_storage::QueryParams {
+            path_prefix: Some(path.to_string()),
+            ..Default::default()
+        })
+        .await
+        .expect("list");
+    assert_eq!(
+        listed.len(),
+        1,
+        "a superseded record must not appear in `list`; got {:?}",
+        listed.iter().map(|e| e.id).collect::<Vec<_>>()
+    );
+    assert_eq!(
+        listed[0].id, second.id,
+        "`list` must report the record the path currently resolves to"
+    );
+    assert_eq!(listed[0].encrypted_data, b"v2");
+
+    // And the record the path resolves to is the one `get_by_path` returns.
+    let resolved = storage
+        .get_by_path(path)
+        .await
+        .expect("read")
+        .expect("the current record is present");
+    assert_eq!(resolved.id, listed[0].id);
+}

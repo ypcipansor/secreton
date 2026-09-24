@@ -736,3 +736,137 @@ impl StorageBackend for NamespacedBackend {
         self.inner.delete_expired_oauth_states().await
     }
 }
+
+/// Regression (severe): the fenced write must serialise with a takeover that is *in flight*,
+/// not merely with one that has already committed.
+///
+/// The pre-fix statement used a plain `WHERE EXISTS (SELECT 1 FROM secreton_entries ...)`.
+/// Under READ COMMITTED that is an unlocked snapshot read, so a takeover transaction that has
+/// executed `UPDATE ... SET metadata['storage_owner'] = 'B'` but **not** committed is invisible
+/// to it: the stale attempt still sees `'A'`, its write commits, and — because the fenced write
+/// lands *after* the takeover — it overwrites the winner's artifact. The path then resolves to
+/// the loser's record, so the shares the winner returned no longer open the stored root key.
+///
+/// This test forces exactly that interleaving. It holds the takeover in an open transaction on
+/// one connection, starts the stale fenced write on another, proves the write is *blocked* on
+/// the takeover's row lock (the property the fix adds), then lets the takeover commit and
+/// asserts the stale write wrote nothing. The pre-fix code returns `Ok(true)` here and leaves
+/// the loser's payload at the path; the fix returns `Ok(false)`.
+#[tokio::test]
+async fn postgres_fenced_write_serialises_with_an_in_flight_takeover() {
+    let Some(url) = database_url() else {
+        return;
+    };
+    migrate_once(&url).await;
+
+    let backend = PostgresBackend::new(&url).await.expect("connect");
+    let namespace = format!("it/{}", uuid::Uuid::new_v4());
+    let storage: Arc<NamespacedBackend> = Arc::new(NamespacedBackend {
+        inner: PostgresBackend::new(&url).await.expect("connect"),
+        prefix: namespace.clone(),
+    });
+
+    let lease = "sys/init_lease";
+    let artifact = "sys/root_key_enc";
+    let scoped_lease = format!("{}/{}", namespace, lease);
+
+    // The winner holds the lease ...
+    storage
+        .store(
+            &secreton_storage::SecretEntry::new(
+                lease.to_string(),
+                b"lease-held-by-a".to_vec(),
+                secreton_storage::EncryptionMetadata::default(),
+                secreton_storage::SecurityLevel::Internal,
+                uuid::Uuid::nil(),
+            )
+            .owned_by("A"),
+        )
+        .await
+        .expect("store lease");
+
+    // ... and attempt A is about to publish its root key through the fence.
+    let artifact_entry = |token: &str, payload: &[u8]| {
+        secreton_storage::SecretEntry::new(
+            artifact.to_string(),
+            payload.to_vec(),
+            secreton_storage::EncryptionMetadata::default(),
+            secreton_storage::SecurityLevel::TopSecret,
+            uuid::Uuid::nil(),
+        )
+        .owned_by(token)
+    };
+
+    // A takeover of the lease is started on its own connection and left **uncommitted**, so
+    // the lease row is locked while its recorded owner is already 'B' in that transaction.
+    let mut takeover_conn = backend.pool().get().await.expect("takeover connection");
+    let takeover = takeover_conn.transaction().await.expect("begin takeover");
+    takeover
+        .execute(
+            "UPDATE secreton_entries \
+             SET metadata = jsonb_set(metadata, '{storage_owner}', '\"B\"') \
+             WHERE path = $1",
+            &[&scoped_lease],
+        )
+        .await
+        .expect("stage the takeover without committing");
+
+    // Start A's stale fenced write while the takeover holds the row lock.
+    let mut pending = {
+        let storage = storage.clone();
+        let entry = artifact_entry("A", b"loser-artifact");
+        tokio::spawn(async move {
+            storage
+                .store_fenced(&entry, secreton_storage::StorageFence::new(lease, "A"))
+                .await
+        })
+    };
+
+    // The fix makes this write block on the takeover's lock. The pre-fix `EXISTS` read does
+    // not: it reads the stale snapshot and publishes immediately, so this assertion fails.
+    assert!(
+        tokio::time::timeout(std::time::Duration::from_millis(500), &mut pending)
+            .await
+            .is_err(),
+        "a fenced write must serialise with an in-flight takeover; it published while the \
+         takeover held the lease row lock, which means the fence is a snapshot read"
+    );
+
+    // Let the takeover commit, then release the write.
+    takeover.commit().await.expect("commit the takeover");
+    let wrote = pending
+        .await
+        .expect("the stale write task must not panic")
+        .expect("the stale write must return a result, not an error");
+    assert!(
+        !wrote,
+        "an attempt whose lease was taken over must not publish its artifact"
+    );
+
+    // The artifact must be absent: A's write was refused, so nothing opened the path.
+    assert!(
+        storage.get_by_path(artifact).await.expect("read").is_none(),
+        "a refused fenced write must leave no artifact behind"
+    );
+
+    // The winner's own fenced write still succeeds and lands the winner's record.
+    assert!(
+        storage
+            .store_fenced(
+                &artifact_entry("B", b"winner-artifact"),
+                secreton_storage::StorageFence::new(lease, "B")
+            )
+            .await
+            .expect("the winner's fenced write"),
+        "the new lease holder must be able to publish its artifact"
+    );
+    let resolved = storage
+        .get_by_path(artifact)
+        .await
+        .expect("read")
+        .expect("the winner's artifact is present");
+    assert_eq!(
+        resolved.encrypted_data, b"winner-artifact",
+        "the path must resolve to the winner's record"
+    );
+}

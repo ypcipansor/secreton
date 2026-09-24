@@ -102,11 +102,40 @@ and ~59k, and from not compiling at all to a green build with a full test suite.
   path mapping, leaving the winner's returned shares unable to open the root key the path
   resolved to. Artifact writes now go through `StorageBackend::store_fenced`, which makes
   the write itself conditional on the lease record still carrying the attempt's token, in
-  one step in the shared backend: PostgreSQL evaluates the insert and the conflict arm
-  against the lease row in a single statement, Redis in one Lua script, and the file
-  backend under an OS advisory lock. A backend that cannot enforce a fence returns
-  `StorageError::Unsupported` and `init` treats that as a hard failure rather than falling
-  back to an unconditional write.
+  one step in the shared backend: PostgreSQL locks the lease row with `FOR SHARE` in the
+  same statement that writes the artifact, Redis evaluates the fence in one Lua script, and
+  the file backend holds an OS advisory lock across both. A backend that cannot enforce a
+  fence returns `StorageError::Unsupported` and `init` treats that as a hard failure rather
+  than falling back to an unconditional write.
+- **The PostgreSQL fence was a snapshot read, so a takeover in flight did not stop a stale
+  write.** `store_fenced` used `INSERT ... SELECT ... WHERE EXISTS (SELECT 1 FROM
+  secreton_entries WHERE path = $13 AND metadata->>'storage_owner' = $14)`. Under READ
+  COMMITTED that is an unlocked read of the statement's snapshot: a takeover that had
+  executed its `UPDATE` but not yet committed was invisible, so the stale attempt still saw
+  its own token, its write committed *after* the takeover, and the path then resolved to the
+  loser's record — the winner's shares no longer opened the stored root key. The fence is now
+  a CTE that selects the lease row `FOR SHARE`, so the fence read takes a row lock for the
+  statement's duration; a concurrent takeover blocks it, and when the takeover commits the
+  lock is re-evaluated against the new row version, so a token that is no longer the lease's
+  owner matches nothing and the write affects zero rows.
+- **A conditional or fenced Redis write made an expiring record immortal.** Both scripts
+  `SET` the value and the path mapping with no deadline, so a caller that asked for an
+  expiry got a record that Redis served forever while its own body still said `expires_at`
+  had passed. The deadline is now applied inside the script, as an absolute Unix second so
+  a retry after the "identity moved" signal cannot shorten the TTL by the elapsed time.
+- **A superseded record appeared in `list` and inflated `count`.** Redis entry keys and
+  file records are keyed by id, and `store` is last-writer-wins by id, so a rewrite carrying
+  a fresh id for an existing path left the previous record behind — a deleted secret `list`
+  still showed, and `count` grew on every update. Redis `list` now keeps only the record
+  each path mapping currently names; the file backend orders candidates by `(updated_at,
+  id)` and keeps the one a read resolves to, so `list`, `count` and `get_by_path` cannot
+  disagree.
+- **`MemoryBackend::get_by_id` and `delete_by_id` took their two locks in the opposite
+  order to every writer**, so a reader holding `id_index` while waiting for `data` deadlocked
+  against a writer holding `data` while waiting for `id_index`. `parking_lot` guards block
+  the thread rather than yielding, so the cycle wedged the runtime. Both now take `data`
+  before `id_index`, and `delete_by_id` holds both across the lookup, removal and index
+  update so a concurrent writer cannot commit a new mapping for the id being deleted.
 - **A conditional write could publish an identity taken from a stale read.** The Redis
   backend chose the record's `id` from a read that happened before its atomic script, and
   the script trusted it — including deleting whatever id the path happened to name at

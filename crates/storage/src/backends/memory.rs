@@ -55,12 +55,18 @@ impl StorageBackend for MemoryBackend {
     }
 
     async fn get_by_id(&self, id: Uuid) -> StorageResult<Option<SecretEntry>> {
+        // Lock order is `data` before `id_index`, everywhere in this file. The two locks
+        // are not independent: a writer holds `data` while inserting into `id_index`, so a
+        // reader that took `id_index` first could hold it while waiting for `data` and
+        // deadlock against that writer. `parking_lot`'s guards block the thread rather than
+        // yielding, so the cycle wedges the whole runtime instead of just this task.
+        // Taking `data` first also makes the two maps read consistently: no writer can
+        // commit a new `(path, id)` pair between the reads.
+        let data = self.data.read();
         let id_index = self.id_index.read();
-        if let Some(path) = id_index.get(&id) {
-            let data = self.data.read();
-            Ok(data.get(path).cloned())
-        } else {
-            Ok(None)
+        match id_index.get(&id) {
+            Some(path) => Ok(data.get(path).cloned()),
+            None => Ok(None),
         }
     }
 
@@ -83,19 +89,20 @@ impl StorageBackend for MemoryBackend {
     }
 
     async fn delete_by_id(&self, id: Uuid) -> StorageResult<bool> {
+        // Both guards are taken in the file's global order (`data` then `id_index`) so the
+        // lookup, the removal and the index update are one atomic step. Reading the index
+        // first and releasing it would leave a window in which a concurrent writer commits
+        // a new mapping for this id, and the removal would then act on a stale path.
+        let mut data = self.data.write();
         let mut id_index = self.id_index.write();
-        if let Some(path) = id_index.remove(&id) {
-            let mut data = self.data.write();
-            if data.remove(&path).is_some() {
-                Ok(true)
-            } else {
-                // restore index consistency if data missing unexpectedly
-                id_index.insert(id, path);
-                Ok(false)
-            }
-        } else {
-            Ok(false)
-        }
+        let Some(path) = id_index.get(&id).cloned() else {
+            return Ok(false);
+        };
+        let present = data.remove(&path).is_some();
+        // Drop the index entry either way: a mapping that points at no record sends the next
+        // `get_by_id` to a missing path and reports the record as absent.
+        id_index.remove(&id);
+        Ok(present)
     }
 
     async fn delete_by_path(&self, path: &str) -> StorageResult<bool> {
@@ -532,5 +539,73 @@ mod tests {
         };
         backend.store_oauth_state(&stale).await.unwrap();
         assert!(backend.get_oauth_state("stale").await.unwrap().is_none());
+    }
+
+    /// Every operation that touches both maps must take `data` before `id_index`.
+    ///
+    /// `get_by_id` previously read `id_index` first and then `data`, while every writer holds
+    /// `data` and then takes `id_index`. Two threads in that shape deadlock: the reader holds
+    /// the index lock and waits for `data`, the writer holds `data` and waits for the index.
+    /// `parking_lot` guards block the whole thread, so the runtime stalls rather than the task.
+    ///
+    /// The test does not race. It holds `data` itself, so a reader parked in `get_by_id` can
+    /// only be blocked either before taking `id_index` (correct order) or after taking it (the
+    /// inversion). It then probes whether `id_index` is held by someone else: under the
+    /// inversion the reader holds it for as long as `data` is held, so the probe finds it
+    /// locked; under the correct order the reader is parked on `data` and never touches the
+    /// index, so the probe always succeeds. The reader runs on its own OS thread with its own
+    /// runtime, so blocking it on a `parking_lot` guard cannot stall the probe.
+    #[test]
+    fn get_by_id_takes_data_before_id_index() {
+        let backend = Arc::new(MemoryBackend::new());
+        let seed = entry("kv/lock_order");
+        let seed_id = seed.id;
+        futures_executor_block_on(backend.store(&seed)).expect("seed the record");
+
+        // Holding `data` pins any reader to its first lock: whichever lock `get_by_id` takes
+        // first, this guard is what it blocks on next.
+        let data_guard = backend.data.write();
+
+        let reader_backend = backend.clone();
+        let started = Arc::new(std::sync::Barrier::new(2));
+        let reader_barrier = started.clone();
+        let reader = std::thread::spawn(move || {
+            let rt = tokio::runtime::Builder::new_current_thread()
+                .build()
+                .expect("reader runtime");
+            // Signal readiness, then enter `get_by_id` and block on the held `data` guard.
+            reader_barrier.wait();
+            rt.block_on(reader_backend.get_by_id(seed_id))
+        });
+
+        // Wait until the reader is about to call `get_by_id`, then let it reach its first lock.
+        started.wait();
+        let deadline = std::time::Instant::now() + std::time::Duration::from_millis(500);
+        let mut inversion_detected = false;
+        while std::time::Instant::now() < deadline {
+            if backend.id_index.try_write().is_none() {
+                inversion_detected = true;
+                break;
+            }
+            std::thread::yield_now();
+        }
+
+        drop(data_guard);
+        let _ = reader.join().expect("reader thread");
+
+        assert!(
+            !inversion_detected,
+            "`get_by_id` must take `data` before `id_index`. A reader that held `id_index` \
+             while waiting for `data` inverts the writers' order and deadlocks against them"
+        );
+    }
+
+    /// Run a future to completion without depending on the ambient test runtime.
+    fn futures_executor_block_on<F: std::future::Future>(future: F) -> F::Output {
+        tokio::runtime::Builder::new_current_thread()
+            .enable_all()
+            .build()
+            .expect("runtime")
+            .block_on(future)
     }
 }

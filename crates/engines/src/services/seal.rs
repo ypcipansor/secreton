@@ -3823,25 +3823,6 @@ mod tests {
                     message: "injected staging failure after TOTP enrollment".to_string(),
                 });
             }
-            // A one-shot staging fault, but only once the enrollment exists, so the failure
-            // lands in the window where the account and its second factor are already stored
-            // and cleanup must remove them.
-            if entry.path == INIT_STAGING_PATH
-                && self
-                    .fail_staging_after_totp
-                    .load(std::sync::atomic::Ordering::SeqCst)
-                && self.totp_exists().await
-                && self
-                    .fail_staging_after_totp
-                    .swap(false, std::sync::atomic::Ordering::SeqCst)
-            {
-                self.staging_fault_fired
-                    .store(true, std::sync::atomic::Ordering::SeqCst);
-                return Err(secreton_storage::StorageError::BackendError {
-                    backend: "fault-injected".to_string(),
-                    message: "injected staging failure after TOTP enrollment".to_string(),
-                });
-            }
             self.maybe_pause(&entry.path).await;
             self.inner.compare_and_set(entry, expect).await
         }
