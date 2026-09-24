@@ -414,61 +414,103 @@ impl StorageBackend for PostgresBackend {
                 updated_at = EXCLUDED.updated_at,
                 expires_at = EXCLUDED.expires_at"#;
 
+        // The owner-conditional replacement is a single `UPDATE` whose precondition and
+        // write are the same statement, so they cannot interleave: PostgreSQL evaluates the
+        // `WHERE` against the row it is about to overwrite, inside the statement's own
+        // snapshot, and a row whose recorded owner is no longer the expected token affects
+        // zero rows. `id` and `created_at` are deliberately absent from the `SET`, so the
+        // existing row's identity and creation time are preserved exactly as `upsert` and
+        // the other backends preserve them. The parameters are contiguous ($1–$11) because
+        // this statement does not share the insert's placeholder numbering.
+        //
+        // The previous form built `INSERT ... SELECT ... WHERE false ON CONFLICT ... DO
+        // UPDATE`. The insert arm could never produce a row, and an `ON CONFLICT` clause
+        // only fires when the insert actually conflicts, so the `DO UPDATE` arm was
+        // unreachable: replacement of an *existing* row always affected zero rows and
+        // reported failure. `SealService::acquire_init_lease` uses exactly this operation to
+        // take over an expired initialization lease, so a vault left by a dead process could
+        // never be recovered on PostgreSQL.
+        let owner_update_set = r#"
+                encrypted_data = $2,
+                encryption_metadata = $3,
+                security_level = $4,
+                metadata = $5,
+                tags = $6,
+                version = $7,
+                owner_id = $8,
+                updated_at = $9,
+                expires_at = $10"#;
+
         let insert_columns = "INSERT INTO secreton_entries \
             (id, path, encrypted_data, encryption_metadata, security_level, metadata, tags, version, owner_id, created_at, updated_at, expires_at)";
         let insert_values = "VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)";
         let base = format!("{insert_columns} {insert_values}");
-        // The insert arm of the owner case must never fire: an `ON CONFLICT` clause only
-        // applies when the insert actually conflicts, so a bare owner-conditional `UPDATE`
-        // left the plain INSERT path open — a write to an *absent* path then succeeded and
-        // reported `Ok(true)`. A precondition that is satisfied by the absence of the record
-        // it constrains is a precondition that fails open, and it did so on the one backend
-        // where a lost race is most expensive. `WHERE false` on a `SELECT`-form insert makes
-        // the arm unsatisfiable, so an absent row yields zero rows affected, which the caller
-        // reads as "the precondition did not hold".
-        let owner_only_base = format!(
-            "{insert_columns} \
-             SELECT $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12 WHERE false"
-        );
-
-        let query = match expect {
-            crate::Expect::Absent => format!("{base} ON CONFLICT (path) DO NOTHING"),
-            crate::Expect::Any => format!("{base} ON CONFLICT (path) DO UPDATE SET{update_set}"),
-            crate::Expect::Owner(_) => {
-                // The owner key is a compile-time constant, not interpolated input.
-                format!(
-                    "{owner_only_base} ON CONFLICT (path) DO UPDATE SET{update_set} \
-                     WHERE secreton_entries.metadata->>'{owner}' = $13",
-                    owner = crate::OWNER_TOKEN_KEY
-                )
-            }
-        };
 
         let security_level = entry.security_level as i32;
         let version = entry.version as i32;
-
         let token = match expect {
-            crate::Expect::Owner(token) => Some(token.to_string()),
-            _ => None,
+            crate::Expect::Owner(token) => token.to_string(),
+            _ => String::new(),
         };
 
-        let mut params: Vec<&(dyn tokio_postgres::types::ToSql + Sync)> = vec![
-            &entry.id,
-            &entry.path,
-            &entry.encrypted_data,
-            &encryption_metadata_json,
-            &security_level,
-            &metadata_json,
-            &entry.tags,
-            &version,
-            &entry.owner_id,
-            &entry.created_at,
-            &entry.updated_at,
-            &entry.expires_at,
-        ];
-        if let Some(token) = &token {
-            params.push(token);
-        }
+        let (query, params): (String, Vec<&(dyn tokio_postgres::types::ToSql + Sync)>) =
+            match expect {
+                crate::Expect::Absent => (
+                    format!("{base} ON CONFLICT (path) DO NOTHING"),
+                    vec![
+                        &entry.id,
+                        &entry.path,
+                        &entry.encrypted_data,
+                        &encryption_metadata_json,
+                        &security_level,
+                        &metadata_json,
+                        &entry.tags,
+                        &version,
+                        &entry.owner_id,
+                        &entry.created_at,
+                        &entry.updated_at,
+                        &entry.expires_at,
+                    ],
+                ),
+                crate::Expect::Any => (
+                    format!("{base} ON CONFLICT (path) DO UPDATE SET{update_set}"),
+                    vec![
+                        &entry.id,
+                        &entry.path,
+                        &entry.encrypted_data,
+                        &encryption_metadata_json,
+                        &security_level,
+                        &metadata_json,
+                        &entry.tags,
+                        &version,
+                        &entry.owner_id,
+                        &entry.created_at,
+                        &entry.updated_at,
+                        &entry.expires_at,
+                    ],
+                ),
+                crate::Expect::Owner(_) => (
+                    // The owner key is a compile-time constant, not interpolated input.
+                    format!(
+                        "UPDATE secreton_entries SET{owner_update_set} \
+                         WHERE path = $1 AND metadata->>'{owner}' = $11",
+                        owner = crate::OWNER_TOKEN_KEY
+                    ),
+                    vec![
+                        &entry.path,
+                        &entry.encrypted_data,
+                        &encryption_metadata_json,
+                        &security_level,
+                        &metadata_json,
+                        &entry.tags,
+                        &version,
+                        &entry.owner_id,
+                        &entry.updated_at,
+                        &entry.expires_at,
+                        &token,
+                    ],
+                ),
+            };
 
         let rows_affected =
             client

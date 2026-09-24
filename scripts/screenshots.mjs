@@ -56,6 +56,21 @@ function launchOptions() {
 
 const results = [];
 
+// Measure the layout properties a screenshot must satisfy. Shared by every view so the
+// denial path is held to exactly the same standard as the others: an overflow or an
+// undersized control that only appears once the error alert renders must fail the run just
+// as it would on a healthy view.
+async function probeLayout(page) {
+  return page.evaluate(() => {
+    const text = (document.body.innerText || "").trim();
+    const de = document.documentElement;
+    const tiny = [...document.querySelectorAll("button, a, input")]
+      .map((e) => e.getBoundingClientRect())
+      .filter((r) => r.width > 0 && r.height > 0 && (r.width < 8 || r.height < 8));
+    return { text, overflowX: de.scrollWidth - de.clientWidth, tinyControls: tiny.length };
+  });
+}
+
 async function shoot(page, name, urlPath, expectedStatus) {
   const errors = [];
   const onError = (e) => errors.push(String(e));
@@ -66,14 +81,7 @@ async function shoot(page, name, urlPath, expectedStatus) {
   const resp = await page.goto(BASE + urlPath, { waitUntil: "networkidle" });
   await page.waitForTimeout(1800);
 
-  const probe = await page.evaluate(() => {
-    const text = (document.body.innerText || "").trim();
-    const de = document.documentElement;
-    const tiny = [...document.querySelectorAll("button, a, input")]
-      .map((e) => e.getBoundingClientRect())
-      .filter((r) => r.width > 0 && r.height > 0 && (r.width < 8 || r.height < 8));
-    return { text, overflowX: de.scrollWidth - de.clientWidth, tinyControls: tiny.length };
-  });
+  const probe = await probeLayout(page);
 
   const file = path.join(OUT, `${name}.png`);
   // `animations: "disabled"` settles CSS transitions before capture; without it a
@@ -147,11 +155,19 @@ async function main() {
 
   // Collect errors for the denial path too, rather than asserting an empty list. The
   // server function answers 500 for a rejected sign-in (that is how Leptos reports a
-  // `ServerFnError`), so the browser logs exactly one failed XHR; anything beyond that is
-  // a real defect and fails the run.
+  // `ServerFnError`), so the browser logs exactly one failed resource; anything beyond that
+  // is a real defect and fails the run.
+  //
+  // The console text alone ("Failed to load resource: ... 500 ...") does not name the URL,
+  // so the location is appended. That lets the whitelist below key on the actual
+  // server-function request rather than on any error that happens to mention 500.
   const denialErrors = [];
   const onDenialError = (e) => denialErrors.push(String(e));
-  const onDenialConsole = (m) => m.type() === "error" && denialErrors.push(m.text());
+  const onDenialConsole = (m) => {
+    if (m.type() !== "error") return;
+    const loc = m.location();
+    denialErrors.push(loc && loc.url ? `${m.text()} @ ${loc.url}` : m.text());
+  };
   page.on("pageerror", onDenialError);
   page.on("console", onDenialConsole);
 
@@ -162,13 +178,17 @@ async function main() {
   page.off("pageerror", onDenialError);
   page.off("console", onDenialConsole);
 
+  // Measure the settled DOM, not a hard-coded "looks fine". The alert is on screen by now,
+  // so an overflow or an undersized control introduced by the error state is caught here
+  // exactly as it would be on any other view.
+  const errProbe = await probeLayout(page);
+
   await page.screenshot({
     path: path.join(OUT, "login-error.png"),
     fullPage: true,
     animations: "disabled",
     timeout: 30000,
   });
-  const errText = await page.locator("body").innerText();
   const errFile = path.join(OUT, "login-error.png");
   const alertText = (await page.locator('[role="alert"]').innerText()).trim();
   results.push({
@@ -176,11 +196,11 @@ async function main() {
     status: 200,
     expectedStatus: 200,
     bytes: fs.statSync(errFile).size,
-    overflowX: 0,
-    tinyControls: 0,
+    overflowX: errProbe.overflowX,
+    tinyControls: errProbe.tinyControls,
     jsErrors: denialErrors,
     alertText,
-    textLength: errText.length,
+    textLength: errProbe.text.length,
   });
   console.log(`  login-error      HTTP 200  ${fs.statSync(errFile).size} bytes`);
 
@@ -216,10 +236,12 @@ async function main() {
   // error fails the run.
   //   - the 404 page: the browser logs its own document request as a failed resource.
   //   - the rejected sign-in: Leptos reports a `ServerFnError` as an HTTP 500, so the
-  //     failed server-function POST shows up once.
+  //     failed server-function POST shows up once. The match is deliberately narrow — it
+  //     requires the failed *fetch* of the server-function endpoint alongside the 500, so an
+  //     unrelated error that merely mentions 500 is still a failure.
   const expectedError = (r, e) => {
     if (r.status === 404 && e.includes("404")) return true;
-    if (r.view === "login-error" && e.includes("500")) return true;
+    if (r.view === "login-error" && e.includes("500") && e.includes("/api/")) return true;
     return false;
   };
 

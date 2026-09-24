@@ -21,8 +21,8 @@ use std::time::Duration;
 
 use secreton_storage::cache::CachedStorage;
 use secreton_storage::{
-    EncryptionMetadata, FileBackend, MemoryBackend, SecretEntry, SecurityLevel, StorageBackend,
-    StorageFence, StorageResult,
+    EncryptionMetadata, Expect, FileBackend, MemoryBackend, SecretEntry, SecurityLevel,
+    StorageBackend, StorageFence, StorageResult,
 };
 
 fn entry(path: &str, owner: &str, payload: &[u8]) -> SecretEntry {
@@ -137,6 +137,109 @@ async fn cache_wrapper_preserves_the_fence_contract() {
         Duration::from_secs(60),
     ));
     assert_fenced_contract(storage.as_ref(), "sys/init_lease").await;
+}
+
+/// The owner-conditional `compare_and_set` contract every backend must honour.
+///
+/// `SealService::acquire_init_lease` takes over an *expired* initialization lease with
+/// `compare_and_set(.., Expect::Owner(token))`. If a backend reports the precondition failed
+/// when it actually held, a vault left behind by a dead process can never be recovered. This
+/// pins the four behaviours the takeover depends on, and is run against every backend that
+/// claims cross-process coordination — the PostgreSQL variant lives in `seal_postgres.rs`
+/// because it needs a real server.
+async fn assert_owner_compare_and_set_contract(backend: &(dyn StorageBackend + Send + Sync)) {
+    let path = "contract/owner-cas";
+
+    // Absent: owner-conditional insert must fail closed, not create the row.
+    assert!(
+        !backend
+            .compare_and_set(&entry(path, "a", b"absent"), Expect::Owner("a"))
+            .await
+            .expect("owner-conditional write to an absent path"),
+        "an owner precondition must not be satisfied by the absence of the record"
+    );
+    assert!(
+        backend.get_by_path(path).await.expect("read").is_none(),
+        "an owner-conditional write to an absent path must not create a record"
+    );
+
+    // Present and owned by "a": replacement must succeed.
+    assert!(
+        backend
+            .compare_and_set(&entry(path, "a", b"first"), Expect::Absent)
+            .await
+            .expect("insert-if-absent"),
+        "the first insert-if-absent must win"
+    );
+    let original_id = backend
+        .get_by_path(path)
+        .await
+        .expect("read")
+        .expect("inserted")
+        .id;
+
+    assert!(
+        backend
+            .compare_and_set(&entry(path, "a", b"replaced"), Expect::Owner("a"))
+            .await
+            .expect("owner-conditional replacement of an existing row"),
+        "the recorded owner must be able to replace the record"
+    );
+    let replaced = backend
+        .get_by_path(path)
+        .await
+        .expect("read")
+        .expect("still present");
+    assert_eq!(
+        replaced.encrypted_data, b"replaced",
+        "the replacement payload must be stored"
+    );
+    assert_eq!(
+        replaced.id, original_id,
+        "a replacement must keep the existing record's id"
+    );
+
+    // Present but owned by someone else: must refuse and change nothing.
+    assert!(
+        !backend
+            .compare_and_set(&entry(path, "b", b"stolen"), Expect::Owner("b"))
+            .await
+            .expect("owner-conditional write by a non-owner"),
+        "a caller that does not hold the recorded token must not replace the record"
+    );
+    let untouched = backend
+        .get_by_path(path)
+        .await
+        .expect("read")
+        .expect("still present");
+    assert_eq!(
+        untouched.encrypted_data, b"replaced",
+        "a refused owner-conditional write must not change the payload"
+    );
+}
+
+#[tokio::test]
+async fn memory_backend_honours_owner_conditional_replacement() {
+    assert_owner_compare_and_set_contract(&MemoryBackend::new()).await;
+}
+
+#[tokio::test]
+async fn file_backend_honours_owner_conditional_replacement() {
+    let dir = tempfile::tempdir().expect("temp dir");
+    let backend = FileBackend::new(dir.path().to_str().expect("utf8 path")).expect("file backend");
+    assert_owner_compare_and_set_contract(&backend).await;
+}
+
+#[tokio::test]
+async fn cache_wrapper_preserves_owner_conditional_replacement() {
+    use secreton_storage::cache::InMemoryCache;
+
+    let storage: Arc<dyn StorageBackend + Send + Sync> = Arc::new(CachedStorage::new(
+        MemoryBackend::new(),
+        InMemoryCache::new(),
+        Duration::from_secs(60),
+    ));
+    assert_owner_compare_and_set_contract(storage.as_ref()).await;
 }
 
 /// Raft's state machine is a process-local map no second replica observes, so it must refuse a

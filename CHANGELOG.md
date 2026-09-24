@@ -121,6 +121,16 @@ and ~59k, and from not compiling at all to a green build with a full test suite.
   publish failed because the file had already been moved away. Each write stages into its
   own uniquely named temporary file (`create_new`, so the kernel refuses a name that is
   taken) and publishes it with the atomic rename.
+- **An expired initialization lease could never be taken over on PostgreSQL.** The
+  owner-conditional replacement built `INSERT ... SELECT ... WHERE false ON CONFLICT ... DO
+  UPDATE`; the insert arm can never produce a row, and an `ON CONFLICT` clause only fires
+  when the insert actually conflicts, so the `DO UPDATE` arm was unreachable and replacing an
+  existing row always affected zero rows. `SealService::acquire_init_lease` uses exactly this
+  operation to take over a lease left behind by a dead process, so a PostgreSQL vault
+  abandoned mid-initialization could never be recovered. It is now a single `UPDATE ... WHERE
+  path = $1 AND metadata->>'storage_owner' = $11`, whose precondition and write are the same
+  statement and which preserves the existing row's `id` and `created_at`; an absent path
+  affects zero rows and fails closed.
 
 ### Removed
 

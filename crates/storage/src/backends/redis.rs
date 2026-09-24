@@ -961,4 +961,85 @@ mod tests {
             "deleting the record must not leave a mapping that resolves to nothing"
         );
     }
+
+    /// The owner-conditional `compare_and_set` contract against a real server, matching the
+    /// PostgreSQL and in-process suites. `SealService::acquire_init_lease` takes over an
+    /// expired lease through this operation; a backend that refused while it actually held
+    /// would make a vault left by a dead process unrecoverable.
+    #[tokio::test]
+    async fn owner_conditional_replacement_is_atomic_and_fails_closed() {
+        let Some(url) = redis_url() else {
+            return;
+        };
+        let namespace = format!("it/{}", Uuid::new_v4());
+        let path = format!("{namespace}/contract/owner-cas");
+        let backend = RedisBackend::new(&url).await.expect("connect");
+
+        // An owner precondition on an absent path must refuse and create nothing.
+        assert!(
+            !backend
+                .compare_and_set(&entry_at(&path, b"absent"), Expect::Owner("a"))
+                .await
+                .expect("owner-conditional write to an absent path"),
+            "an owner precondition must not be satisfied by the absence of the record"
+        );
+        assert!(
+            backend.get_by_path(&path).await.expect("read").is_none(),
+            "an owner-conditional write to an absent path must not create a record"
+        );
+
+        // The recorded owner can replace an existing record, preserving its identity.
+        let seeded = entry_at(&path, b"first").owned_by("a");
+        let seeded_id = seeded.id;
+        assert!(
+            backend
+                .compare_and_set(&seeded, Expect::Absent)
+                .await
+                .expect("insert-if-absent")
+        );
+        assert!(
+            backend
+                .compare_and_set(
+                    &entry_at(&path, b"replaced").owned_by("a"),
+                    Expect::Owner("a")
+                )
+                .await
+                .expect("owner-conditional replacement"),
+            "the recorded owner must be able to replace an existing record"
+        );
+        let replaced = backend
+            .get_by_path(&path)
+            .await
+            .expect("read")
+            .expect("still present");
+        assert_eq!(replaced.encrypted_data, b"replaced");
+        assert_eq!(
+            replaced.id, seeded_id,
+            "a replacement must preserve the existing record's identity"
+        );
+
+        // A caller without the recorded token is refused and the record is untouched.
+        assert!(
+            !backend
+                .compare_and_set(
+                    &entry_at(&path, b"stolen").owned_by("b"),
+                    Expect::Owner("b")
+                )
+                .await
+                .expect("owner-conditional write by a non-owner"),
+            "a caller that does not hold the recorded token must not replace the record"
+        );
+        assert_eq!(
+            backend
+                .get_by_path(&path)
+                .await
+                .expect("read")
+                .expect("still present")
+                .encrypted_data,
+            b"replaced",
+            "a refused owner-conditional write must not change the record"
+        );
+
+        backend.delete_by_id(seeded_id).await.expect("cleanup");
+    }
 }

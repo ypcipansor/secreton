@@ -361,6 +361,203 @@ async fn postgres_store_fenced_refuses_a_lost_lease_and_preserves_the_winner() {
     );
 }
 
+/// The owner-conditional replacement `SealService::acquire_init_lease` uses to take over an
+/// expired lease must work on PostgreSQL. Before the fix the statement was
+/// `INSERT ... SELECT ... WHERE false ON CONFLICT ... DO UPDATE`, whose insert arm can never
+/// produce a row and whose `ON CONFLICT` arm therefore never fires: replacing an existing
+/// row always affected zero rows. This proves the four behaviours takeover depends on against
+/// a real server.
+#[tokio::test]
+async fn postgres_owner_conditional_replacement_is_atomic_and_fails_closed() {
+    use secreton_storage::{Expect, SecretEntry, SecurityLevel, StorageBackend};
+
+    let Some(url) = database_url() else {
+        return;
+    };
+    migrate_once(&url).await;
+    let backend = PostgresBackend::new(&url).await.expect("connect");
+    let storage: Arc<NamespacedBackend> = Arc::new(NamespacedBackend {
+        inner: backend,
+        prefix: format!("it/{}", uuid::Uuid::new_v4()),
+    });
+
+    let entry = |owner: &str, payload: &[u8]| {
+        SecretEntry::new(
+            "contract/owner-cas".to_string(),
+            payload.to_vec(),
+            secreton_storage::EncryptionMetadata::default(),
+            SecurityLevel::Internal,
+            uuid::Uuid::nil(),
+        )
+        .owned_by(owner)
+    };
+
+    // (c) An absent path must refuse and must not create a record.
+    assert!(
+        !storage
+            .compare_and_set(&entry("a", b"absent"), Expect::Owner("a"))
+            .await
+            .expect("owner-conditional write to an absent path"),
+        "an owner precondition must not be satisfied by the absence of the record"
+    );
+    assert!(
+        storage
+            .get_by_path("contract/owner-cas")
+            .await
+            .expect("read")
+            .is_none(),
+        "an owner-conditional write to an absent path must not create a record"
+    );
+
+    // (a) The recorded owner can replace an existing row.
+    assert!(
+        storage
+            .compare_and_set(&entry("a", b"first"), Expect::Absent)
+            .await
+            .expect("insert-if-absent"),
+        "the first insert-if-absent must win"
+    );
+    let original = storage
+        .get_by_path("contract/owner-cas")
+        .await
+        .expect("read")
+        .expect("inserted");
+    let original_id = original.id;
+    let original_created_at = original.created_at;
+    assert!(
+        storage
+            .compare_and_set(&entry("a", b"replaced"), Expect::Owner("a"))
+            .await
+            .expect("owner-conditional replacement of an existing row"),
+        "the recorded owner must be able to replace an existing row; a zero-row UPDATE \
+         means an expired initialization lease can never be taken over on PostgreSQL"
+    );
+    let replaced = storage
+        .get_by_path("contract/owner-cas")
+        .await
+        .expect("read")
+        .expect("still present");
+    assert_eq!(replaced.encrypted_data, b"replaced");
+    assert_eq!(
+        replaced.id, original_id,
+        "a replacement must preserve the existing row's id"
+    );
+    assert_eq!(
+        replaced.created_at, original_created_at,
+        "a replacement must preserve the existing row's creation time"
+    );
+
+    // (b) A caller without the recorded token is refused and the row is untouched.
+    assert!(
+        !storage
+            .compare_and_set(&entry("b", b"stolen"), Expect::Owner("b"))
+            .await
+            .expect("owner-conditional write by a non-owner"),
+        "a caller that does not hold the recorded token must not replace the row"
+    );
+    assert_eq!(
+        storage
+            .get_by_path("contract/owner-cas")
+            .await
+            .expect("read")
+            .expect("still present")
+            .encrypted_data,
+        b"replaced",
+        "a refused owner-conditional write must not change the row"
+    );
+}
+
+/// (d) and (e): an expired initialization lease can be taken over by a second instance, and a
+/// live lease cannot be stolen. The lease record is seeded directly in the exact shape
+/// `lease_entry` writes, so the takeover runs the real `acquire_init_lease` path
+/// deterministically — no sleep, no shortened TTL.
+#[tokio::test]
+async fn postgres_expired_initialization_lease_can_be_taken_over_and_a_live_one_cannot() {
+    use chrono::Utc;
+    use secreton_storage::{Expect, SecretEntry, SecurityLevel, StorageBackend};
+
+    let Some(url) = database_url() else {
+        return;
+    };
+    migrate_once(&url).await;
+    let backend = PostgresBackend::new(&url).await.expect("connect");
+    let storage: Arc<dyn StorageBackend + Send + Sync> = Arc::new(NamespacedBackend {
+        inner: backend,
+        prefix: format!("it/{}", uuid::Uuid::new_v4()),
+    });
+
+    let lease_entry = |owner: &str, expires_at: i64| {
+        SecretEntry::new(
+            "sys/init_lease".to_string(),
+            serde_json::to_vec(&serde_json::json!({ "owner": owner, "expires_at": expires_at }))
+                .expect("lease json"),
+            secreton_storage::EncryptionMetadata::default(),
+            SecurityLevel::Internal,
+            uuid::Uuid::nil(),
+        )
+        .owned_by(owner)
+    };
+
+    let (auth, mfa, seal) = replica(storage.clone()).await;
+
+    // (e) A live lease must not be stolen: the second instance fails closed.
+    storage
+        .compare_and_set(
+            &lease_entry("live-holder", Utc::now().timestamp() + 3600),
+            Expect::Absent,
+        )
+        .await
+        .expect("seed a live lease");
+    let refused = seal.init(3, 2, "root-b", &auth, &mfa).await;
+    assert!(
+        refused.is_err(),
+        "an initialization must not steal a live lease; got {:?}",
+        refused.as_ref().ok().map(|_| "ok")
+    );
+    assert!(
+        storage
+            .get_by_path("sys/init_lease")
+            .await
+            .expect("read")
+            .expect("the live lease is still present")
+            .has_owner("live-holder"),
+        "the live holder's lease must be unchanged by a refused attempt"
+    );
+
+    // (d) An expired lease can be taken over, and initialization then completes.
+    assert!(
+        storage
+            .compare_and_set(
+                &lease_entry("dead-holder", Utc::now().timestamp() - 1),
+                Expect::Owner("live-holder"),
+            )
+            .await
+            .expect("expire the lease"),
+        "replacing the live holder's lease with an expired one must succeed"
+    );
+    let initialized = seal
+        .init(3, 2, "root-b", &auth, &mfa)
+        .await
+        .expect("a vault left by a dead process must be recoverable on PostgreSQL");
+    seal.unseal(&initialized.keys[0]).await.expect("share one");
+    let complete = seal
+        .unseal(&initialized.keys[1])
+        .await
+        .expect("the recovered vault's shares must open its root key");
+    assert!(
+        complete.root_token.is_some(),
+        "the recovered vault must issue its bootstrap credential"
+    );
+    assert!(
+        storage
+            .get_by_path("sys/init_lease")
+            .await
+            .expect("read")
+            .is_none(),
+        "a completed initialization must release its cross-process lease"
+    );
+}
+
 /// Prefix every path so one run owns an isolated namespace in a shared database. The
 /// service under test is path-keyed throughout, so re-scoping on the way in and out is all
 /// that is needed; the entry bodies are opaque to this wrapper.

@@ -227,14 +227,22 @@ Prometheus — keduanya tidak menyediakan endpoint Prometheus.
 
 ## 5. CI/CD
 
-Empat workflow di `.github/workflows/`:
+Lima workflow di `.github/workflows/`:
 
 | Workflow | Isi |
 |----------|-----|
 | `ci.yml` | Job: fmt, clippy, test (dengan service PostgreSQL), WASM + Leptos build, feature matrix, MSRV, docs, docker build, lalu job `CI` agregat yang gagal jika ada job gagal atau dibatalkan |
-| `security.yml` | Audit dependensi dan kebijakan `deny.toml` |
+| `security.yml` | Audit dependensi (`cargo-audit`, `cargo-deny`), pemindaian rahasia (gitleaks), dan pemindaian filesystem Trivy |
 | `codeql-analysis.yml` | Analisis CodeQL |
 | `pr-validation.yml` | Validasi pull request |
+| `screenshots.yml` | Satu-satunya pemeriksaan yang mengeksekusi frontend yang dirender: membangun server + wasm, menjalankannya, membuat akun, lalu menjalankan `npm run screenshots` untuk menangkap dan memverifikasi keenam view |
+
+`npm run screenshots:check` bukan pengujian frontend: perintah itu hanya preflight yang
+membuktikan `playwright-core` dapat di-resolve dan Chromium dapat diluncurkan. Gate
+frontend yang sebenarnya adalah langkah `npm run screenshots` di `screenshots.yml`, yang
+berjalan setelah server dibangun dan siap. Job ini tidak pernah meng-commit PNG; ia
+meng-upload `docs/screenshots/` sebagai artefak dan hanya memperingatkan saat gambar
+berubah, karena dashboard memuat jumlah rahasia langsung.
 
 Semua perintah cargo memakai `--locked`, sehingga `Cargo.lock` yang di-commit
 mendeskripsikan artefak yang benar-benar dikirim.
