@@ -135,7 +135,8 @@ pub fn generate_key(algorithm: AlgorithmId) -> CryptoResult<Vec<u8>> {
 
     match algorithm {
         AlgorithmId::EcdsaP256 => {
-            let secret_key = p256::SecretKey::random(&mut OsRng);
+            use p256::elliptic_curve::Generate;
+            let secret_key = p256::SecretKey::generate();
             let doc = secret_key.to_pkcs8_der().map_err(|e| {
                 CryptoError::KeyGenerationFailed(format!(
                     "ECDSA P-256 PKCS8 encoding failed: {}",
@@ -145,7 +146,8 @@ pub fn generate_key(algorithm: AlgorithmId) -> CryptoResult<Vec<u8>> {
             Ok(doc.as_bytes().to_vec())
         }
         AlgorithmId::EcdsaP384 => {
-            let secret_key = p384::SecretKey::random(&mut OsRng);
+            use p384::elliptic_curve::Generate;
+            let secret_key = p384::SecretKey::generate();
             let doc = secret_key.to_pkcs8_der().map_err(|e| {
                 CryptoError::KeyGenerationFailed(format!(
                     "ECDSA P-384 PKCS8 encoding failed: {}",

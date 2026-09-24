@@ -2,11 +2,9 @@
 
 use crate::model::*;
 use crate::service::*;
-use argon2::Argon2;
+use argon2::{Argon2, PasswordHash, PasswordHasher, PasswordVerifier, password_hash::phc::Salt};
 use async_trait::async_trait;
 use chrono::Utc;
-use password_hash::{PasswordHash, PasswordHasher, PasswordVerifier, SaltString};
-use rand::rngs::OsRng;
 use secreton_domain::SecretonError;
 use std::collections::HashMap;
 use tokio::sync::RwLock;
@@ -71,10 +69,10 @@ impl UserPassAuthMethod {
         policies: Vec<String>,
         permissions: Vec<String>,
     ) -> AuthMethodResult<String> {
-        let salt = SaltString::generate(&mut OsRng);
+        let salt = Salt::generate();
         let argon2 = Argon2::default();
         let password_hash = argon2
-            .hash_password(password.as_bytes(), &salt)
+            .hash_password_with_salt(password.as_bytes(), salt.as_ref())
             .map_err(|_| SecretonError::Internal {
                 message: "Password hashing failed".to_string(),
             })?

@@ -3,7 +3,7 @@
 use async_trait::async_trait;
 use base32::{decode, encode};
 use chrono::{DateTime, Utc};
-use hmac::{Hmac, Mac};
+use hmac::{Hmac, KeyInit, Mac};
 use rand::Rng;
 use sha1::Sha1;
 use std::collections::HashMap;
