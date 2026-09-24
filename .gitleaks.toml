@@ -25,12 +25,35 @@ regexes = [
   '''sk-123456789abcdef''',
   # GCP/OCI engines tag records with their KMS algorithm, not a credential.
   '''KEY_ALG_RSA_2048''',
+  # `curl` examples in the documentation pass a literal placeholder token. These are
+  # whole-tree and historical: the fictional `your-token` / `hvs.*` values are what the
+  # docs tell a reader to substitute, never something issued by this service.
+  '''(?i)hvs\.(admin|root|your)?-?token(-here)?''',
+  '''(?i)your[-_](root[-_])?token(-here)?''',
+  '''YOUR_TOKEN''',
+  # Stripe-style placeholder keys in the demo scripts.
+  '''sk_(live|test)_[a-z0-9]+''',
+  # Hard-coded fixture strings: a repeating base64 alphabet, a hex-ish key, a truncated
+  # Slack token, a raft demo key, the default encryption key, and a cipher name that the
+  # `generic-api-key` rule mistakes for a credential because of the surrounding `_key`.
+  '''0123456789ABCDEFGHIJKLMNOPQRSTUVW''',
+  '''MDEyMzQ1Njc4OUFCQ0RFRkdISUpLTE1OT1BRUlNUVVZX''',
+  '''SG\.abc123xyz''',
+  '''raft-key-12345''',
+  '''default-encryption-key-32-chars-long''',
+  '''chacha20-poly1305''',
+  # JWT fixtures. The header/payload pairs end in a literal `...` or a `.test-signature`
+  # marker, so neither is a token that was ever signed.
+  '''eyJ[A-Za-z0-9_-]+\.\.\.''',
+  '''\.test-signature''',
   # Mocked PEM bodies. A real key never has a literal MOCK_KEY_DATA body, a truncated
   # `MIIEv...` body, an empty JSON object, or a `[Private _key _data...]` placeholder
   # where the DER bytes belong.
   '''MOCK_KEY_DATA''',
   '''BEGIN PRIVATE KEY-----.+?\{\}''',
-  '''-----BEGIN PRIVATE KEY-----\\nMIIEv\.\.\.''',
+  '''placeholder key data''',
   '''-----BEGIN OPENSSH PRIVATE KEY-----''',
+  '''-----BEGIN (RSA|EC|Ed25519) PRIVATE KEY-----''',
+  '''BEGIN PRIVATE KEY-----\\n(\.\.\.|MIIEv)''',
   '''\[Private _key _data''',
 ]
