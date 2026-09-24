@@ -321,71 +321,6 @@ impl FileBackend {
         Ok(entries)
     }
 
-    /// Filter entries based on query parameters
-    fn filter_entries(&self, entries: Vec<SecretEntry>, params: &QueryParams) -> Vec<SecretEntry> {
-        entries
-            .into_iter()
-            .filter(|entry| {
-                if !Self::entry_matches(entry, params) {
-                    return false;
-                }
-
-                true
-            })
-            .collect()
-    }
-
-    /// Whether `entry` passes every predicate in `params`, with no path-collapse applied.
-    fn entry_matches(entry: &SecretEntry, params: &QueryParams) -> bool {
-        // Filter by path prefix
-        if let Some(prefix) = &params.path_prefix
-            && !entry.path.starts_with(prefix)
-        {
-            return false;
-        }
-
-        // Filter by security level
-        if let Some(min_level) = params.security_level
-            && entry.security_level < min_level
-        {
-            return false;
-        }
-
-        // Filter by tags
-        if !params.tags.is_empty() {
-            let entry_tags: std::collections::HashSet<_> = entry.tags.iter().collect();
-            let filter_tags: std::collections::HashSet<_> = params.tags.iter().collect();
-            if !filter_tags.is_subset(&entry_tags) {
-                return false;
-            }
-        }
-
-        // Filter by owner
-        if let Some(owner_id) = params.owner_id
-            && entry.owner_id != owner_id
-        {
-            return false;
-        }
-
-        // Filter by metadata
-        for (key, value) in &params.metadata_filters {
-            if let Some(entry_value) = entry.metadata.get(key) {
-                if entry_value != value {
-                    return false;
-                }
-            } else {
-                return false;
-            }
-        }
-
-        // Filter expired entries
-        if !params.include_expired && entry.is_expired() {
-            return false;
-        }
-
-        true
-    }
-
     /// Collapse records sharing a path down to the single one a read resolves to.
     ///
     /// Entries are files keyed by id, and `store` is last-writer-wins by id, so a write that
@@ -613,44 +548,23 @@ impl StorageBackend for FileBackend {
 
     async fn list(&self, params: &QueryParams) -> StorageResult<Vec<SecretEntry>> {
         // Collapse first, so a path with a superseded record is counted and reported once,
-        // then filter, so the surviving record is the one the query predicates are applied
-        // to. Filtering first could discard the current record while an older one at the same
-        // path survived the predicate, and `count` would still disagree with `list`.
+        // then hand the surviving records to `QueryParams::apply_to`, which is the one
+        // implementation of the query contract shared with the other backends. The previous
+        // hand-rolled filter honoured only a subset of `params`: it ignored
+        // `excluded_path_prefixes` and had no `expires_at` sort, so the lifecycle sweep —
+        // which passes reserved prefixes to skip *and* a `limit` while sorting by
+        // `expires_at` — truncated arbitrary records before reaching expired user secrets,
+        // and those secrets were never swept. Applying the whole contract before pagination
+        // is what makes `limit` keep the records closest to expiry.
         let entries = self.collapse_to_current_paths(self.scan_entries()?);
-        let mut filtered = self.filter_entries(entries, params);
-
-        // Apply sorting if specified
-        if let Some(sort_by) = &params.sort_by {
-            match sort_by.as_str() {
-                "path" => filtered.sort_by(|a, b| a.path.cmp(&b.path)),
-                "created_at" => filtered.sort_by(|a, b| a.created_at.cmp(&b.created_at)),
-                "updated_at" => filtered.sort_by(|a, b| a.updated_at.cmp(&b.updated_at)),
-                _ => {} // No sorting
-            }
-        }
-
-        // Apply sort order if specified
-        if params.sort_order.as_deref() == Some("desc") {
-            filtered.reverse();
-        }
-
-        // Apply offset and limit
-        if let Some(offset) = params.offset {
-            filtered = filtered.into_iter().skip(offset as usize).collect();
-        }
-        if let Some(limit) = params.limit {
-            filtered.truncate(limit as usize);
-        }
-
-        Ok(filtered)
+        Ok(params.apply_to(entries))
     }
 
     async fn count(&self, params: &QueryParams) -> StorageResult<u64> {
         // Count exactly what `list` would return, including the path collapse: a superseded
         // record must not inflate the count any more than it may appear in a listing.
         let entries = self.collapse_to_current_paths(self.scan_entries()?);
-        let filtered = self.filter_entries(entries, params);
-        Ok(filtered.len() as u64)
+        Ok(params.apply_to(entries).len() as u64)
     }
 
     async fn exists(&self, path: &str) -> StorageResult<bool> {
@@ -922,6 +836,66 @@ mod tests {
                 .expect("list")
                 .is_empty(),
             "the superseded record must not appear in a listing"
+        );
+    }
+
+    /// Regression: the lifecycle sweep asks storage to skip reserved namespaces
+    /// (`excluded_path_prefixes`) and orders by `expires_at` *before* applying its
+    /// 10,000-record cap. `FileBackend::list` honoured neither — its hand-rolled predicate
+    /// ignored excluded prefixes and it had no `expires_at` sort — so the cap could be spent
+    /// on `sys/` records before any expired user secret was reached, and those secrets were
+    /// never swept. `list` now applies the whole `QueryParams` contract.
+    ///
+    /// The limit is deliberately larger than the number of non-reserved records, so a
+    /// listing that does not exclude reserved paths *must* return a reserved record: the
+    /// assertion cannot pass by luck.
+    #[tokio::test]
+    async fn the_lifecycle_query_excludes_reserved_records_before_its_limit_on_the_file_backend() {
+        let dir = tempfile::tempdir().expect("temp dir");
+        let backend = FileBackend::new(dir.path().to_str().expect("utf8 path")).expect("backend");
+
+        let now = chrono::Utc::now();
+        // Reserved records with deadlines nearest to expiry: a listing that lets them count
+        // spends its whole limit on them, so the user secret is never reached.
+        for i in 0..5 {
+            let mut reserved = entry_at(Uuid::new_v4(), &format!("sys/keys/{i}"), b"reserved");
+            reserved.expires_at = Some(now - chrono::Duration::seconds(60 - i));
+            backend.store(&reserved).await.expect("store reserved");
+        }
+        let expired_id = Uuid::new_v4();
+        let mut expired = entry_at(expired_id, "kv/app", b"expired");
+        expired.expires_at = Some(now - chrono::Duration::seconds(1));
+        backend
+            .store(&expired)
+            .await
+            .expect("store expired user secret");
+
+        // The sweep's query: expired entries included, earliest deadline first, reserved
+        // namespaces excluded, capped. The cap exceeds the non-reserved count.
+        let params = QueryParams {
+            include_expired: true,
+            sort_by: Some("expires_at".to_string()),
+            sort_order: Some("asc".to_string()),
+            excluded_path_prefixes: vec!["sys/".to_string()],
+            limit: Some(3),
+            ..QueryParams::default()
+        };
+        let listed = backend.list(&params).await.expect("list");
+
+        assert!(
+            !listed.iter().any(|entry| entry.path.starts_with("sys/")),
+            "reserved namespaces must be excluded before the limit is applied, got {:?}",
+            listed.iter().map(|e| &e.path).collect::<Vec<_>>()
+        );
+        assert!(
+            listed.iter().any(|entry| entry.id == expired_id),
+            "the expired user secret must survive the sweep's limited listing"
+        );
+        assert!(
+            listed
+                .windows(2)
+                .all(|pair| pair[0].expires_at <= pair[1].expires_at),
+            "the sweep orders by earliest expiry, so the listing must be sorted by it"
         );
     }
 }

@@ -249,10 +249,16 @@ Refresh token hanya boleh ditukar sekali, dan jaminan itu berlaku lintas replika
 single-use ("reservation") diambil di backend bersama sebelum kerja apa pun yang bisa gagal,
 di path yang diturunkan dari hash token — bukan token itu sendiri — dengan insert-if-absent.
 Penukaran yang gagal melepas klaim secara owner-conditional, sehingga klaim percobaan lain
-yang sudah mengambilnya tidak ikut terhapus; penukaran yang berhasil meninggalkan klaim itu
-sebagai revocation permanen, sehingga token yang sama tidak bisa ditukar lagi. Backend yang
-tidak dapat berkoordinasi lintas proses (`Coordination::SingleProcess`) memakai reservation
-in-memory saja, dan itu adalah jaminan lengkapnya karena tidak ada replika kedua.
+yang sudah mengambilnya tidak ikut terhapus; kegagalan storage sementara juga melepas slot
+in-memory, sehingga percobaan ulang setelah fault tetap bisa berhasil. Penukaran yang berhasil
+meninggalkan klaim itu sebagai revocation permanen, sehingga token yang sama tidak bisa ditukar
+lagi.
+
+Masa berlaku reservation dan revocation diturunkan dari `exp` token itu sendiri, bukan dari
+offset tetap. Token mengikuti `auth.jwt.refresh_expiration`, jadi konfigurasi lebih dari
+delapan hari tidak lagi membuat guard kedaluwarsa sebelum token. Backend yang tidak dapat
+berkoordinasi lintas proses (`Coordination::SingleProcess`) memakai reservation in-memory
+saja, dan itu adalah jaminan lengkapnya karena tidak ada replika kedua.
 
 ### 2.6 AuditEvent
 

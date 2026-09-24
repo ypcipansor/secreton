@@ -169,6 +169,27 @@ and ~59k, and from not compiling at all to a green build with a full test suite.
   failed exchange releases it owner-conditionally and a completed one leaves it as a
   permanent revocation. Backends that cannot coordinate across processes keep the in-memory
   reservation, which is their complete guarantee.
+- **The refresh guard expired before a long-lived refresh token.** The reservation and the
+  revocation that make a refresh token single-use were pinned to a fixed eight-day deadline,
+  while the token's own lifetime comes from `auth.jwt.refresh_expiration`. An operator who
+  configured more than eight days produced tokens that outlived both records, and a replay
+  after the fixed window won the insert-if-absent race and was issued a fresh session — a
+  reuse window that grew with the configured lifetime (CWE-613). Both deadlines are now
+  derived from the token's own `exp`, so the guard lasts exactly as long as the token is
+  valid and no longer; an already-invalid token cannot reach this path.
+- **A transient storage failure during a refresh consumed the token.** When the shared
+  reservation write failed, the reservation returned the error but left the in-memory slot it
+  had just inserted, so every later attempt hit that slot and returned `InvalidToken` without
+  retrying the recovered backend: a brief Redis or PostgreSQL blip logged the user out for
+  the reservation's whole lifetime. The error path now releases the local slot exactly as the
+  already-taken path does, so a retry after the fault succeeds while a genuine reuse is still
+  refused.
+- **The lifecycle sweep silently skipped expired secrets on the file backend.** The sweep
+  asks storage to exclude reserved namespaces and orders by `expires_at` before applying its
+  10,000-record cap. `FileBackend::list` honoured neither — its hand-rolled filter ignored
+  `excluded_path_prefixes` and it had no `expires_at` sort — so the cap could be spent on
+  `sys/` records and expired user secrets past the cutoff were never deleted. `list` and
+  `count` now apply the full `QueryParams` contract before pagination.
 - **A TLS connection could lose its `Secure` cookie and HSTS.** The middleware decided
   whether a request was secure from `request.uri().scheme_str()`, which is empty for an
   HTTP/1.1 request in origin-form — every browser request — so a process serving TLS

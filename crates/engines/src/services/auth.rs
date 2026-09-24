@@ -1345,7 +1345,21 @@ impl AuthenticationService {
         // service error, a failed session write) returned an error while the old token was
         // already blacklisted: the caller held no new token and could never retry with the
         // old one, so a transient fault permanently logged them out.
-        let refresh_expiry = chrono::Utc::now() + chrono::Duration::days(8);
+        // The reservation and the later revocation must outlive the token they guard for the
+        // token's whole life. A fixed eight-day window did not: when an operator configured
+        // `auth.jwt.refresh_expiration` longer than eight days, an exchanged token outlived
+        // both records, and once they expired a replay won the insert-if-absent race and was
+        // issued a fresh session — a reuse window that grew with the configured lifetime.
+        // Deriving the deadline from the token's own `exp` makes the guard last exactly as
+        // long as the token; `validate_refresh_token` already rejects the token past that
+        // point, so this can never under-reserve. The fallback is effectively unreachable
+        // (validation proved `exp` a live timestamp), but it is kept so a malformed value
+        // cannot shorten the guard.
+        let refresh_expiry = i64::try_from(claims.exp)
+            .ok()
+            .and_then(|secs| chrono::DateTime::from_timestamp(secs, 0))
+            .filter(|exp| *exp > chrono::Utc::now())
+            .unwrap_or_else(|| chrono::Utc::now() + chrono::Duration::days(8));
         let Some(reservation_owner) = self
             .reserve_refresh_token(refresh_token, refresh_expiry)
             .await?
@@ -1764,7 +1778,17 @@ impl AuthenticationService {
                 blacklist.remove(refresh_token);
                 Ok(None)
             }
-            Err(e) => Err(AuthError::Storage(e)),
+            Err(e) => {
+                // The shared claim did not complete, so this process did not win the slot
+                // either. The in-memory insert above must be undone, exactly as the
+                // `Ok(false)` arm does: leaving it behind made a transient storage fault —
+                // a brief Redis or PostgreSQL disconnect — consume the refresh token on this
+                // instance for the reservation's whole lifetime, so every retry returned
+                // `InvalidToken` without ever consulting the recovered backend.
+                let mut blacklist = self.token_blacklist.write().await;
+                blacklist.remove(refresh_token);
+                Err(AuthError::Storage(e))
+            }
         }
     }
 
@@ -3275,6 +3299,111 @@ mod tests {
         }
     }
 
+    /// A cross-process backend that fails the *first* reservation claim once, modelling a
+    /// brief storage outage at the moment a refresh is being exchanged.
+    #[derive(Debug)]
+    struct FailingReservationBackend {
+        inner: secreton_storage::FileBackend,
+        armed: std::sync::atomic::AtomicBool,
+        fired: std::sync::atomic::AtomicBool,
+    }
+
+    impl FailingReservationBackend {
+        fn new(inner: secreton_storage::FileBackend) -> Self {
+            Self {
+                inner,
+                armed: std::sync::atomic::AtomicBool::new(false),
+                fired: std::sync::atomic::AtomicBool::new(false),
+            }
+        }
+    }
+
+    #[async_trait::async_trait]
+    impl StorageBackend for FailingReservationBackend {
+        async fn store(&self, entry: &SecretEntry) -> StorageResult<()> {
+            self.inner.store(entry).await
+        }
+        async fn get_by_id(&self, id: Uuid) -> StorageResult<Option<SecretEntry>> {
+            self.inner.get_by_id(id).await
+        }
+        async fn get_by_path(&self, path: &str) -> StorageResult<Option<SecretEntry>> {
+            self.inner.get_by_path(path).await
+        }
+        async fn update(&self, entry: &SecretEntry) -> StorageResult<()> {
+            self.inner.update(entry).await
+        }
+        async fn upsert(&self, entry: &SecretEntry) -> StorageResult<()> {
+            self.inner.upsert(entry).await
+        }
+        async fn delete_by_id(&self, id: Uuid) -> StorageResult<bool> {
+            self.inner.delete_by_id(id).await
+        }
+        async fn delete_by_path(&self, path: &str) -> StorageResult<bool> {
+            self.inner.delete_by_path(path).await
+        }
+        async fn compare_and_set(
+            &self,
+            entry: &SecretEntry,
+            expect: secreton_storage::Expect<'_>,
+        ) -> StorageResult<bool> {
+            if entry.path.starts_with(REFRESH_RESERVATION_STORAGE_PREFIX)
+                && expect == secreton_storage::Expect::Absent
+                && self.armed.load(std::sync::atomic::Ordering::SeqCst)
+            {
+                self.armed.store(false, std::sync::atomic::Ordering::SeqCst);
+                self.fired.store(true, std::sync::atomic::Ordering::SeqCst);
+                return Err(secreton_storage::StorageError::ConnectionFailed {
+                    message: "injected reservation write failure".to_string(),
+                });
+            }
+            self.inner.compare_and_set(entry, expect).await
+        }
+        async fn delete_owned(&self, path: &str, token: &str) -> StorageResult<bool> {
+            self.inner.delete_owned(path, token).await
+        }
+        async fn list(&self, params: &QueryParams) -> StorageResult<Vec<SecretEntry>> {
+            self.inner.list(params).await
+        }
+        async fn count(&self, params: &QueryParams) -> StorageResult<u64> {
+            self.inner.count(params).await
+        }
+        async fn exists(&self, path: &str) -> StorageResult<bool> {
+            self.inner.exists(path).await
+        }
+        async fn begin_transaction(
+            &self,
+        ) -> StorageResult<Box<dyn secreton_storage::StorageTransaction>> {
+            self.inner.begin_transaction().await
+        }
+        async fn store_oauth_state(
+            &self,
+            state: &secreton_domain::OAuthState,
+        ) -> StorageResult<()> {
+            self.inner.store_oauth_state(state).await
+        }
+        async fn get_oauth_state(
+            &self,
+            state: &str,
+        ) -> StorageResult<Option<secreton_domain::OAuthState>> {
+            self.inner.get_oauth_state(state).await
+        }
+        async fn delete_expired_oauth_states(&self) -> StorageResult<u64> {
+            self.inner.delete_expired_oauth_states().await
+        }
+        fn coordination(&self) -> secreton_storage::Coordination {
+            secreton_storage::Coordination::CrossProcess
+        }
+        async fn health_check(&self) -> StorageResult<secreton_storage::HealthStatus> {
+            self.inner.health_check().await
+        }
+        async fn get_stats(&self) -> StorageResult<secreton_storage::StorageStats> {
+            self.inner.get_stats().await
+        }
+        async fn migrate(&self) -> StorageResult<()> {
+            self.inner.migrate().await
+        }
+    }
+
     /// A service over a caller-supplied backend, with the root key installed so record
     /// encryption works — the same graph [`auth_with_open_barrier`] builds.
     async fn auth_with_storage(
@@ -3294,6 +3423,16 @@ mod tests {
         storage: Arc<dyn StorageBackend + Send + Sync>,
         root_key: Vec<u8>,
     ) -> Arc<AuthenticationService> {
+        auth_with_storage_root_key_and_refresh_ttl(storage, root_key, 86400 * 7).await
+    }
+
+    /// The same graph, with an explicit refresh-token lifetime so a test can exercise a
+    /// deployment whose `auth.jwt.refresh_expiration` differs from the default.
+    async fn auth_with_storage_root_key_and_refresh_ttl(
+        storage: Arc<dyn StorageBackend + Send + Sync>,
+        root_key: Vec<u8>,
+        refresh_expiration_secs: u64,
+    ) -> Arc<AuthenticationService> {
         let crypto = Arc::new(CryptoService::new(storage.clone()).await.unwrap());
         crypto
             .set_root_key(root_key)
@@ -3304,6 +3443,7 @@ mod tests {
         config.jwt.secret = Some("test_secret".to_string());
         config.jwt.issuer = "secreton".to_string();
         config.jwt.audience = "secreton-api".to_string();
+        config.jwt.refresh_expiration = refresh_expiration_secs;
 
         let mfa = Arc::new(CombinedMfaService::new(
             Arc::new(PersistentTotpService::new(
@@ -3493,6 +3633,159 @@ mod tests {
         assert_eq!(
             winners, 1,
             "exactly one replica may hold the single-use reservation; got a={claim_a:?} b={claim_b:?}",
+        );
+    }
+
+    #[tokio::test]
+    async fn a_transient_reservation_failure_does_not_consume_the_refresh_token() {
+        // Regression: when the shared reservation write failed, `reserve_refresh_token`
+        // returned the error but left the in-memory slot it had just inserted. The next
+        // request for the same token hit that slot and returned `InvalidToken` without ever
+        // retrying the backend, so a brief Redis/PostgreSQL blip during a refresh logged the
+        // user out for the whole reservation lifetime even after storage recovered. The
+        // error path must undo the local slot exactly as the `Ok(false)` path does.
+        let _env = crate::test_support::without_root_key();
+
+        let dir = tempfile::tempdir().expect("tempdir");
+        let file_storage =
+            secreton_storage::FileBackend::new(dir.path().to_str().expect("utf-8 path"))
+                .expect("file backend");
+        let backend = Arc::new(FailingReservationBackend::new(file_storage));
+        let storage: Arc<dyn StorageBackend + Send + Sync> = backend.clone();
+        let service = auth_with_storage(storage).await;
+
+        let password = crate::test_support::generated_password();
+        service
+            .register_user("reservation-user", &password, None, vec![], vec![])
+            .await
+            .expect("register user");
+        let login = service
+            .login(
+                ApiLoginRequest {
+                    username: "reservation-user".to_string(),
+                    password,
+                    mfa_code: None,
+                },
+                "192.0.2.1".to_string(),
+                "test".to_string(),
+            )
+            .await
+            .expect("login");
+        let refresh = login.token.refresh_token.clone();
+
+        // The next reservation claim fails once, standing in for a storage outage.
+        backend
+            .armed
+            .store(true, std::sync::atomic::Ordering::SeqCst);
+        let failed = service
+            .refresh_token(&refresh, "192.0.2.1".to_string(), "test".to_string())
+            .await;
+        assert!(
+            failed.is_err(),
+            "the injected storage failure must surface to the caller"
+        );
+        assert!(
+            backend.fired.load(std::sync::atomic::Ordering::SeqCst),
+            "the reservation fault must actually have fired, or this test proves nothing"
+        );
+
+        // Storage has recovered; the same refresh token must still be exchangeable. Before
+        // the fix the local slot was left behind and this returned `InvalidToken`.
+        let exchanged = service
+            .refresh_token(&refresh, "192.0.2.1".to_string(), "test".to_string())
+            .await
+            .expect("a retry after a transient reservation failure must succeed");
+        assert!(!exchanged.access_token.is_empty());
+
+        // Reuse detection still holds: the exchanged token is now revoked.
+        assert!(
+            service
+                .refresh_token(&refresh, "192.0.2.1".to_string(), "test".to_string())
+                .await
+                .is_err(),
+            "a successfully exchanged refresh token must not be replayable"
+        );
+    }
+
+    #[tokio::test]
+    async fn a_refresh_token_outlives_its_reservation_only_until_its_own_expiry() {
+        // Regression (CWE-613): the reservation and the revocation were pinned to a fixed
+        // eight days. When `auth.jwt.refresh_expiration` was configured longer, the token
+        // outlived both guards, and a replay after eight days won the insert-if-absent race
+        // and was issued a fresh session. The guard is now derived from the token's own
+        // `exp`, so it lasts as long as the token remains valid and no longer.
+        //
+        // The deployment here is deliberately one of those: a 30-day refresh lifetime. The
+        // observable is the durable reservation the exchange leaves behind — it must reach
+        // the token's own deadline, not a shorter fixed window.
+        let _env = crate::test_support::without_root_key();
+
+        let dir = tempfile::tempdir().expect("tempdir");
+        let file_storage =
+            secreton_storage::FileBackend::new(dir.path().to_str().expect("utf-8 path"))
+                .expect("file backend");
+        let storage: Arc<dyn StorageBackend + Send + Sync> = Arc::new(file_storage);
+        let root_key = secreton_crypto::generate_key(secreton_crypto::AlgorithmId::Aes256Gcm)
+            .expect("root key");
+        let service =
+            auth_with_storage_root_key_and_refresh_ttl(storage.clone(), root_key, 86_400 * 30)
+                .await;
+
+        let password = crate::test_support::generated_password();
+        service
+            .register_user("long-lived-user", &password, None, vec![], vec![])
+            .await
+            .expect("register user");
+        let login = service
+            .login(
+                ApiLoginRequest {
+                    username: "long-lived-user".to_string(),
+                    password,
+                    mfa_code: None,
+                },
+                "192.0.2.1".to_string(),
+                "test".to_string(),
+            )
+            .await
+            .expect("login");
+        let refresh = login.token.refresh_token.clone();
+
+        // The token really does carry the configured 30-day lifetime, so a fixed eight-day
+        // guard would be strictly shorter — this is the defect's precondition, asserted
+        // rather than assumed.
+        let claims = service
+            .token_service
+            .validate_refresh_token(&refresh)
+            .expect("refresh claims");
+        let token_expiry = i64::try_from(claims.exp)
+            .ok()
+            .and_then(|secs| chrono::DateTime::from_timestamp(secs, 0))
+            .expect("token expiry as a timestamp");
+        assert!(
+            token_expiry > chrono::Utc::now() + chrono::Duration::days(8),
+            "precondition: the refresh lifetime must exceed the old fixed guard"
+        );
+
+        // Exchange it. A successful rotation leaves the reservation in place for the
+        // token's whole life (that permanence is what closes the cross-replica race).
+        service
+            .refresh_token(&refresh, "192.0.2.1".to_string(), "test".to_string())
+            .await
+            .expect("refresh");
+
+        // Read the durable reservation back. Before the fix its deadline was `now + 8 days`
+        // and the token outlived it; now it is the token's own deadline.
+        let path = AuthenticationService::refresh_reservation_path(&refresh);
+        let stored = storage
+            .get_by_path(&path)
+            .await
+            .expect("read reservation")
+            .expect("a successful exchange must leave its reservation in place");
+        let recorded = stored.expires_at.expect("the reservation must expire");
+        assert!(
+            recorded >= token_expiry - chrono::Duration::seconds(1),
+            "the reservation must last as long as the token, not on a shorter fixed \
+             window: recorded={recorded} token={token_expiry}"
         );
     }
 
