@@ -72,9 +72,9 @@ pub trait TotpService: Send + Sync {
     /// second factor for a privileged account — a service that inherited this default and
     /// ignored the fence would create that enrollment anyway. A fence-free call (the
     /// ordinary user enrollment, and every single-process backend where no lease record
-    /// exists) is unaffected. [`PersistentTotpService`] overrides this with a real fenced
-    /// write; `InMemoryTotpService` does not, and is therefore only usable where no fence
-    /// is ever supplied.
+    /// exists) is unaffected. The persistent service in `secreton-engines` overrides this
+    /// with a real fenced write; `InMemoryTotpService` does not, and is therefore only
+    /// usable where no fence is ever supplied.
     async fn enroll_owned(
         &self,
         entity_id: Uuid,
