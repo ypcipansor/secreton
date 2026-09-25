@@ -14,6 +14,8 @@ pub mod backends;
 pub mod cache;
 pub mod factory;
 pub mod models;
+#[cfg(test)]
+pub(crate) mod test_support;
 
 #[cfg(feature = "postgres")]
 pub use backends::PostgresBackend;
@@ -145,6 +147,95 @@ impl SecretEntry {
         }
         self
     }
+
+    /// Tag this entry with the identifier of the operation that owns it.
+    ///
+    /// Used by [`StorageBackend::compare_and_set`] and
+    /// [`StorageBackend::delete_owned`] as the fencing token: a conditional write or a
+    /// conditional delete only applies while the record still carries this value. The
+    /// token identifies an attempt, never a user, secret or credential, and is stored in
+    /// the entry's ordinary metadata map so every backend already persists it.
+    pub fn owned_by(mut self, token: &str) -> Self {
+        self.metadata
+            .insert(OWNER_TOKEN_KEY.to_string(), token.to_string());
+        self
+    }
+
+    /// The owner token recorded by [`Self::owned_by`], if any.
+    pub fn owner_token(&self) -> Option<&str> {
+        self.metadata.get(OWNER_TOKEN_KEY).map(String::as_str)
+    }
+
+    /// Whether this entry is owned by `token`.
+    pub fn has_owner(&self, token: &str) -> bool {
+        self.owner_token() == Some(token)
+    }
+}
+
+/// Metadata key under which [`SecretEntry::owned_by`] records its owner token.
+pub const OWNER_TOKEN_KEY: &str = "storage_owner";
+
+/// Precondition for [`StorageBackend::compare_and_set`].
+///
+/// The three variants are the whole contract: a caller states what must already be true
+/// at the path, and the backend performs the check and the write as one indivisible step.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Expect<'a> {
+    /// No record may exist at the path. This is insert-if-absent.
+    Absent,
+    /// The record at the path must carry this exact owner token.
+    Owner(&'a str),
+    /// No precondition. The write is still a single atomic replacement, which is what
+    /// distinguishes it from a read followed by a separate `store`.
+    Any,
+}
+
+/// A cross-process fencing token: the durable record a write must still be holding.
+///
+/// `check()`-then-write is not a guarantee. A snapshot of "I still own the lease" taken in
+/// one process says nothing about durable state by the time the next write lands, and the
+/// two are separated by an arbitrary window — a renewal that failed, a lease that expired
+/// and was taken over, a holder that lost a race it never observed. The only way to close
+/// that window is to make the write itself conditional on the fence *in the shared
+/// backend*, which is what [`StorageBackend::store_fenced`] does with this value.
+///
+/// It names the path and the owner token of the record that must still be present and
+/// still carry that token for the write to happen. Initialization fences on the lease
+/// record, not on the artifact's own token: an artifact's token is self-asserted by the
+/// writer and proves nothing, whereas the lease is the record a *winner* also has to hold.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct StorageFence<'a> {
+    /// Path of the record that must still exist and still be owned.
+    pub path: &'a str,
+    /// The owner token that record must still carry.
+    pub token: &'a str,
+}
+
+impl<'a> StorageFence<'a> {
+    pub fn new(path: &'a str, token: &'a str) -> Self {
+        Self { path, token }
+    }
+}
+
+/// What coordination a backend can actually provide between callers.
+///
+/// This is a property of the backend, not a configuration knob, and it is what lets the
+/// seal service decide whether an operation needs a cross-process lease or can rely on its
+/// in-process mutex alone. A durable backend that two replicas may share must report
+/// [`Coordination::CrossProcess`] and implement [`StorageBackend::compare_and_set`],
+/// [`StorageBackend::delete_owned`] and [`StorageBackend::store_fenced`] for real; a backend
+/// that is inherently process-local reports [`Coordination::SingleProcess`], and the caller
+/// treats its in-process lock as the whole guarantee rather than inventing a fake
+/// cross-process one.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Coordination {
+    /// Guarantees hold only within one process. Every `MemoryBackend` is a distinct map
+    /// and the single-node Raft state machine lives in memory, so neither can be shared
+    /// between replicas at all.
+    SingleProcess,
+    /// The backend can arbitrate between processes that share it, through
+    /// `compare_and_set`/`delete_owned`. Durable stores fall here.
+    CrossProcess,
 }
 
 impl Default for EncryptionMetadata {
@@ -242,6 +333,97 @@ impl QueryParams {
         self.limit = Some(limit);
         self
     }
+
+    /// Apply this query's filters, sort and pagination to an in-memory slice.
+    ///
+    /// A backend that cannot express a filter server-side (Redis enumerates by scanning)
+    /// uses this so its results match the backends that can, rather than returning
+    /// everything and leaving the caller to notice.
+    pub fn apply_to(&self, mut entries: Vec<SecretEntry>) -> Vec<SecretEntry> {
+        entries.retain(|entry| {
+            if let Some(prefix) = &self.path_prefix
+                && !entry.path.starts_with(prefix)
+            {
+                return false;
+            }
+            if self
+                .excluded_path_prefixes
+                .iter()
+                .any(|p| entry.path.starts_with(p))
+            {
+                return false;
+            }
+            if let Some(min_level) = self.security_level
+                && entry.security_level < min_level
+            {
+                return false;
+            }
+            if !self.tags.is_empty() {
+                let entry_tags: std::collections::HashSet<_> = entry.tags.iter().collect();
+                let filter_tags: std::collections::HashSet<_> = self.tags.iter().collect();
+                if !filter_tags.is_subset(&entry_tags) {
+                    return false;
+                }
+            }
+            if let Some(owner_id) = self.owner_id
+                && entry.owner_id != owner_id
+            {
+                return false;
+            }
+            for (key, value) in &self.metadata_filters {
+                if entry.metadata.get(key) != Some(value) {
+                    return false;
+                }
+            }
+            if !self.include_expired && entry.is_expired() {
+                return false;
+            }
+            true
+        });
+
+        if let Some(sort_by) = &self.sort_by {
+            let descending = self
+                .sort_order
+                .as_deref()
+                .is_some_and(|o| o.eq_ignore_ascii_case("desc"));
+            if sort_by == "expires_at" {
+                // Rank by the entry's own `expires_at`, not by a metadata lookup. The
+                // lifecycle sweep orders by `expires_at` precisely so a `limit` keeps the
+                // records closest to expiry: without this branch the sweep fell through to
+                // the metadata fallback, every entry keyed `""`, and the sort became a no-op
+                // — so the limit truncated arbitrary records and expired secrets past the
+                // cutoff were never swept. A `None` deadline means "never expires", which
+                // must sort last ascending rather than first.
+                entries.sort_by(|a, b| match (a.expires_at, b.expires_at) {
+                    (Some(x), Some(y)) => x.cmp(&y),
+                    (Some(_), None) => std::cmp::Ordering::Less,
+                    (None, Some(_)) => std::cmp::Ordering::Greater,
+                    (None, None) => std::cmp::Ordering::Equal,
+                });
+            } else {
+                let key = |entry: &SecretEntry| match sort_by.as_str() {
+                    "path" => entry.path.clone(),
+                    "created_at" => entry.created_at.to_rfc3339(),
+                    "updated_at" => entry.updated_at.to_rfc3339(),
+                    "security_level" => (entry.security_level as i32).to_string(),
+                    other => entry.metadata.get(other).cloned().unwrap_or_default(),
+                };
+                entries.sort_by_key(key);
+            }
+            if descending {
+                entries.reverse();
+            }
+        }
+
+        let offset = self.offset.unwrap_or(0) as usize;
+        if offset > 0 {
+            entries.drain(..offset.min(entries.len()));
+        }
+        if let Some(limit) = self.limit {
+            entries.truncate(limit as usize);
+        }
+        entries
+    }
 }
 
 /// Storage operation errors
@@ -279,6 +461,14 @@ pub enum StorageError {
 
     #[error("Migration error: {message}")]
     MigrationError { message: String },
+
+    /// The backend cannot provide an operation with the guarantee its contract names.
+    ///
+    /// Returned instead of silently degrading, so a caller that needs atomicity or
+    /// cross-process coordination fails loudly rather than building on a promise the
+    /// backend did not keep.
+    #[error("Unsupported operation: {operation} is not supported by the {backend} backend")]
+    Unsupported { operation: String, backend: String },
 }
 
 // impl From<azure_storage::Error> for StorageError {
@@ -317,11 +507,136 @@ pub trait StorageBackend: std::fmt::Debug + Send + Sync {
     /// Update an existing secreton entry
     async fn update(&self, entry: &SecretEntry) -> StorageResult<()>;
 
+    /// Store an entry, replacing any existing entry at the same path.
+    ///
+    /// `store` is an insert: the backends disagree about what a second write to the same
+    /// path does. In-memory and the file backend overwrite silently; PostgreSQL has a
+    /// `UNIQUE(path)` constraint and the insert fails, and Raft's replicated store would
+    /// likewise create a second record for one path. A caller that can write the same path
+    /// twice — such as initialization recording its progress — therefore cannot use
+    /// `store` portably.
+    ///
+    /// This is the portable replacement, expressed only in terms of the two operations
+    /// every backend implements: it looks the path up, and either `update`s the entry that
+    /// is already there (keeping its id and creation time so `update`, which is keyed by
+    /// id on PostgreSQL and by path on the others, targets the same record) or `store`s a
+    /// new one. It is a read-then-write and so not atomic; the trait offers no
+    /// compare-and-swap, and the seal service serializes its own writes on top of it.
+    async fn upsert(&self, entry: &SecretEntry) -> StorageResult<()> {
+        match self.get_by_path(&entry.path).await? {
+            Some(existing) => {
+                let mut updated = entry.clone();
+                updated.id = existing.id;
+                updated.created_at = existing.created_at;
+                self.update(&updated).await
+            }
+            None => self.store(entry).await,
+        }
+    }
+
     /// Delete a secreton entry by ID
     async fn delete_by_id(&self, id: Uuid) -> StorageResult<bool>;
 
-    /// Delete a secreton entry by path
+    /// What coordination this backend can provide between separate processes.
+    ///
+    /// Callers that need cross-process serialisation — initialization on a durable backend
+    /// two replicas may share — must consult this and refuse to proceed when it is
+    /// [`Coordination::SingleProcess`], rather than trusting an in-process mutex that the
+    /// other replica does not hold. See [`Coordination`].
+    fn coordination(&self) -> Coordination {
+        Coordination::SingleProcess
+    }
+
+    /// Delete a secreton entry by path.
+    ///
+    /// The `bool` answers exactly one question: **did a record at this path exist and get
+    /// removed by this call?** `Ok(true)` means this call removed it; `Ok(false)` means no
+    /// record was there to remove. It is not a statement that the path is now absent: a
+    /// backend that attempts the removal but fails reports the same `false` as one that
+    /// found nothing. A caller that needs "the path is now gone" must read it back rather
+    /// than trust `false`; a caller that needs "my record was removed" must use
+    /// [`Self::delete_owned`], which is conditional and therefore meaningful even when
+    /// this operation cannot report what happened.
     async fn delete_by_path(&self, path: &str) -> StorageResult<bool>;
+
+    /// Atomically write `entry` at its path, but only if `expect` still holds.
+    ///
+    /// This is the compare-and-set the trait otherwise lacks. It is expressed with an
+    /// explicit precondition so a caller can build an inter-process lock or a fenced
+    /// update without a read-then-write window: `Expect::Absent` is insert-if-absent,
+    /// `Expect::Owner(token)` is "replace the record I still own".
+    ///
+    /// Returns `Ok(true)` when the write happened and `Ok(false)` when the precondition
+    /// did not hold — the caller lost the race and must not treat its own state as
+    /// committed. An error is a real storage failure, not a lost race.
+    ///
+    /// The default implementation is deliberately **not** atomic and refuses the two uses
+    /// that need atomicity, because a silently non-atomic default is how a fake lock
+    /// ships. Backends that can make the operation genuinely indivisible override this;
+    /// the ones that cannot return [`StorageError::Unsupported`], and callers that require
+    /// coordination must treat that as a hard stop rather than fall back.
+    async fn compare_and_set(
+        &self,
+        entry: &SecretEntry,
+        expect: Expect<'_>,
+    ) -> StorageResult<bool> {
+        let _ = (entry, expect);
+        Err(StorageError::Unsupported {
+            operation: "compare_and_set".to_string(),
+            backend: "default".to_string(),
+        })
+    }
+
+    /// Atomically write `entry` at its path, but only while `fence` still holds.
+    ///
+    /// This is the primitive that closes the `check()`-then-write window. A caller that has
+    /// taken a lease reads it in one step and writes an artifact in another; between those
+    /// steps the lease can expire, a renewal can fail, or a second process can legitimately
+    /// take it over. The check on its own cannot see any of that. This operation asks the
+    /// shared backend to evaluate the fence and perform the write **as one indivisible
+    /// step**, so the write either happens while the caller demonstrably still holds the
+    /// record, or it does not happen at all.
+    ///
+    /// Returns `Ok(true)` when the write landed and `Ok(false)` when the fence did not hold
+    /// — the caller has lost ownership and must treat its own attempt as failed rather than
+    /// published. An `Err` is a real storage failure. Neither of the non-`true` outcomes
+    /// authorises a fallback to an unconditional write: failing to prove ownership is the
+    /// answer, and the operation must fail closed.
+    ///
+    /// The default refuses, for the same reason [`Self::compare_and_set`] does: a
+    /// read-then-write default is exactly the race this exists to exclude, and a silent
+    /// non-atomic implementation is how a fake lock ships. A backend that reports
+    /// [`Coordination::CrossProcess`] must override this for real.
+    async fn store_fenced(
+        &self,
+        entry: &SecretEntry,
+        fence: StorageFence<'_>,
+    ) -> StorageResult<bool> {
+        let _ = (entry, fence);
+        Err(StorageError::Unsupported {
+            operation: "store_fenced".to_string(),
+            backend: "default".to_string(),
+        })
+    }
+
+    /// Delete the record at `path`, but only while it is still owned by `token`.
+    ///
+    /// Rollback and cleanup must never delete an artifact another attempt now owns, and a
+    /// path that has since been rewritten by someone else must survive. Returns
+    /// `Ok(true)` only when this call removed a record still carrying `token`;
+    /// `Ok(false)` means the record was absent *or* no longer owned by `token`, and in
+    /// either case this call removed nothing. `Ok(false)` therefore never authorises
+    /// cleanup to claim a path is gone — read it back.
+    ///
+    /// Like [`Self::compare_and_set`], the default refuses rather than pretending to be
+    /// conditional: a read-then-delete would race exactly the writer this exists to exclude.
+    async fn delete_owned(&self, path: &str, token: &str) -> StorageResult<bool> {
+        let _ = (path, token);
+        Err(StorageError::Unsupported {
+            operation: "delete_owned".to_string(),
+            backend: "default".to_string(),
+        })
+    }
 
     /// List secreton entries with filtering
     async fn list(&self, params: &QueryParams) -> StorageResult<Vec<SecretEntry>>;
@@ -578,5 +893,89 @@ mod tests {
 
         let debug = format!("{:?}", error);
         assert!(debug.contains("NotFound"));
+    }
+
+    fn query_entry(path: &str, expires_in_minutes: Option<i64>) -> SecretEntry {
+        let mut entry = SecretEntry::new(
+            path.to_string(),
+            vec![1, 2, 3],
+            EncryptionMetadata::default(),
+            SecurityLevel::Internal,
+            Uuid::new_v4(),
+        );
+        entry.expires_at = expires_in_minutes.map(|m| Utc::now() + chrono::Duration::minutes(m));
+        entry
+    }
+
+    #[test]
+    fn expires_at_sort_orders_by_the_entries_own_deadline() {
+        // `expires_at` is not a metadata key, so it used to fall through to the metadata
+        // fallback, keying every entry `""` and leaving the ordering untouched. The
+        // lifecycle sweep relies on this ordering to keep the records closest to expiry
+        // inside its `limit`, so a no-op sort silently made the sweep miss expired secrets.
+        let far = query_entry("kv/far", Some(10_000));
+        let near = query_entry("kv/near", Some(1));
+        let never = query_entry("kv/never", None);
+
+        let params = QueryParams {
+            sort_by: Some("expires_at".to_string()),
+            sort_order: Some("asc".to_string()),
+            include_expired: true,
+            ..Default::default()
+        };
+
+        let ordered = params.apply_to(vec![never.clone(), far.clone(), near.clone()]);
+        let paths: Vec<&str> = ordered.iter().map(|e| e.path.as_str()).collect();
+        assert_eq!(
+            paths,
+            vec!["kv/near", "kv/far", "kv/never"],
+            "ascending `expires_at` must order by the real deadline with no-deadline last"
+        );
+
+        let params_desc = QueryParams {
+            sort_by: Some("expires_at".to_string()),
+            sort_order: Some("desc".to_string()),
+            include_expired: true,
+            ..Default::default()
+        };
+        let ordered_desc = params_desc.apply_to(vec![never, far, near]);
+        let paths: Vec<&str> = ordered_desc.iter().map(|e| e.path.as_str()).collect();
+        assert_eq!(paths, vec!["kv/never", "kv/far", "kv/near"]);
+    }
+
+    #[test]
+    fn excluded_prefixes_are_applied_before_the_limit_truncates() {
+        // The sweep asks for reserved namespaces to be excluded *and* a limit while sorting
+        // by expiry. A backend that counts reserved entries against the limit truncates live
+        // records before the expired one, so the expired secret is never returned and never
+        // swept.
+        let expired = query_entry("apps/expired", Some(-1));
+        let reserved: Vec<SecretEntry> = (0..5)
+            .map(|i| query_entry(&format!("sys/reserved/{i}"), None))
+            .collect();
+
+        let params = QueryParams {
+            include_expired: true,
+            limit: Some(2),
+            sort_by: Some("expires_at".to_string()),
+            sort_order: Some("asc".to_string()),
+            excluded_path_prefixes: vec!["sys/".to_string()],
+            ..Default::default()
+        };
+
+        let mut all = reserved.clone();
+        all.push(expired.clone());
+        let listed = params.apply_to(all);
+
+        assert!(
+            listed.iter().any(|e| e.path == "apps/expired"),
+            "the expired user secret must survive the limit once reserved entries are \
+             excluded first; got {:?}",
+            listed.iter().map(|e| e.path.as_str()).collect::<Vec<_>>()
+        );
+        assert!(
+            listed.iter().all(|e| !e.path.starts_with("sys/")),
+            "reserved entries must not be returned at all"
+        );
     }
 }

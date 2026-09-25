@@ -1,8 +1,8 @@
 //! PostgreSQL storage backend implementation using tokio-postgres
 
 use crate::{
-    HealthStatus, QueryParams, SecretEntry, SecurityLevel, StorageBackend, StorageError,
-    StorageResult, StorageStats, StorageTransaction,
+    Coordination, HealthStatus, QueryParams, SecretEntry, SecurityLevel, StorageBackend,
+    StorageError, StorageFence, StorageResult, StorageStats, StorageTransaction,
 };
 use async_trait::async_trait;
 use deadpool_postgres::{Config, Pool, Runtime};
@@ -198,6 +198,40 @@ impl StorageBackend for PostgresBackend {
             param_count += 1;
         }
 
+        // Security-level, tag and metadata filters are part of the shared query contract
+        // (`QueryParams::apply_to`, implemented by memory/file/Redis). They were previously
+        // dropped here, so a caller that filtered on any of them got every row from
+        // PostgreSQL and a filtered set from every other backend — the same query returning
+        // different results depending only on which backend a deployment chose. Applied at
+        // the SQL layer so they compose with `limit`/`offset` rather than truncating before
+        // the filter.
+        if let Some(min_level) = params.security_level {
+            query.push_str(&format!(" AND security_level >= ${}", param_count));
+            bind_params.push(Box::new(min_level as i32));
+            param_count += 1;
+        }
+
+        // `apply_to` requires every requested tag to be present (subset semantics), which is
+        // exactly what the array containment operator checks.
+        if !params.tags.is_empty() {
+            query.push_str(&format!(" AND tags @> ${}", param_count));
+            bind_params.push(Box::new(params.tags.clone()));
+            param_count += 1;
+        }
+
+        // Same subset semantics as `apply_to`: every key/value pair must match.
+        if !params.metadata_filters.is_empty() {
+            query.push_str(&format!(" AND metadata @> ${}::jsonb", param_count));
+            bind_params.push(Box::new(serde_json::Value::Object(
+                params
+                    .metadata_filters
+                    .iter()
+                    .map(|(k, v)| (k.clone(), serde_json::Value::String(v.clone())))
+                    .collect(),
+            )));
+            param_count += 1;
+        }
+
         // Filter out expired entries unless explicitly requested. This matches
         // the behavior of the InMemory and MySQL backends so that callers see
         // a consistent contract across storage implementations.
@@ -235,6 +269,17 @@ impl StorageBackend for PostgresBackend {
         if let Some(limit) = params.limit {
             query.push_str(&format!(" LIMIT ${}", param_count));
             bind_params.push(Box::new(limit as i64));
+            param_count += 1;
+        }
+
+        // `offset` was dropped here, so a caller paginating with it received page one on
+        // PostgreSQL and the requested page on memory/file/Redis. Applied as a SQL `OFFSET`
+        // after the `ORDER BY`, which is the same window `QueryParams::apply_to` computes.
+        if let Some(offset) = params.offset
+            && offset > 0
+        {
+            query.push_str(&format!(" OFFSET ${}", param_count));
+            bind_params.push(Box::new(offset as i64));
         }
 
         let bind_refs: Vec<&(dyn tokio_postgres::types::ToSql + Sync)> = bind_params
@@ -361,6 +406,299 @@ impl StorageBackend for PostgresBackend {
         Ok(rows_affected > 0)
     }
 
+    fn coordination(&self) -> Coordination {
+        // A shared PostgreSQL is exactly the case where an in-process mutex is not enough:
+        // separate replicas each hold their own, so the row itself has to arbitrate. The
+        // conditional statements below do that in the database.
+        Coordination::CrossProcess
+    }
+
+    /// Conditional write as one statement, so the check and the write cannot interleave.
+    ///
+    /// `ON CONFLICT (path) DO NOTHING` is the insert-if-absent case. For the owner case,
+    /// `DO UPDATE ... WHERE` makes the update itself conditional: PostgreSQL evaluates the
+    /// `WHERE` against the row it is about to overwrite, inside the statement's own
+    /// snapshot, so a record that changed between the caller's read and this write is not
+    /// overwritten and `rows_affected` is 0. That is what makes this a compare-and-set
+    /// rather than the read-then-write the trait's default `upsert` performs.
+    async fn compare_and_set(
+        &self,
+        entry: &SecretEntry,
+        expect: crate::Expect<'_>,
+    ) -> StorageResult<bool> {
+        let client = self
+            .pool
+            .get()
+            .await
+            .map_err(|e| StorageError::ConnectionFailed {
+                message: format!("Failed to get connection: {}", e),
+            })?;
+
+        let encryption_metadata_json =
+            serde_json::to_value(&entry.encryption_metadata).map_err(|e| {
+                StorageError::SerializationError {
+                    message: format!("Failed to serialize encryption metadata: {}", e),
+                }
+            })?;
+        let metadata_json = serde_json::to_value(&entry.metadata).map_err(|e| {
+            StorageError::SerializationError {
+                message: format!("Failed to serialize metadata: {}", e),
+            }
+        })?;
+
+        // `id` and `created_at` are never written on the update path: the existing row's
+        // identity and creation time are preserved, matching `upsert`.
+        let update_set = r#"
+                encrypted_data = EXCLUDED.encrypted_data,
+                encryption_metadata = EXCLUDED.encryption_metadata,
+                security_level = EXCLUDED.security_level,
+                metadata = EXCLUDED.metadata,
+                tags = EXCLUDED.tags,
+                version = EXCLUDED.version,
+                owner_id = EXCLUDED.owner_id,
+                updated_at = EXCLUDED.updated_at,
+                expires_at = EXCLUDED.expires_at"#;
+
+        // The owner-conditional replacement is a single `UPDATE` whose precondition and
+        // write are the same statement, so they cannot interleave: PostgreSQL evaluates the
+        // `WHERE` against the row it is about to overwrite, inside the statement's own
+        // snapshot, and a row whose recorded owner is no longer the expected token affects
+        // zero rows. `id` and `created_at` are deliberately absent from the `SET`, so the
+        // existing row's identity and creation time are preserved exactly as `upsert` and
+        // the other backends preserve them. The parameters are contiguous ($1–$11) because
+        // this statement does not share the insert's placeholder numbering.
+        //
+        // The previous form built `INSERT ... SELECT ... WHERE false ON CONFLICT ... DO
+        // UPDATE`. The insert arm could never produce a row, and an `ON CONFLICT` clause
+        // only fires when the insert actually conflicts, so the `DO UPDATE` arm was
+        // unreachable: replacement of an *existing* row always affected zero rows and
+        // reported failure. `SealService::acquire_init_lease` uses exactly this operation to
+        // take over an expired initialization lease, so a vault left by a dead process could
+        // never be recovered on PostgreSQL.
+        let owner_update_set = r#"
+                encrypted_data = $2,
+                encryption_metadata = $3,
+                security_level = $4,
+                metadata = $5,
+                tags = $6,
+                version = $7,
+                owner_id = $8,
+                updated_at = $9,
+                expires_at = $10"#;
+
+        let insert_columns = "INSERT INTO secreton_entries \
+            (id, path, encrypted_data, encryption_metadata, security_level, metadata, tags, version, owner_id, created_at, updated_at, expires_at)";
+        let insert_values = "VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)";
+        let base = format!("{insert_columns} {insert_values}");
+
+        let security_level = entry.security_level as i32;
+        let version = entry.version as i32;
+        let token = match expect {
+            crate::Expect::Owner(token) => token.to_string(),
+            _ => String::new(),
+        };
+
+        let (query, params): (String, Vec<&(dyn tokio_postgres::types::ToSql + Sync)>) =
+            match expect {
+                crate::Expect::Absent => (
+                    format!("{base} ON CONFLICT (path) DO NOTHING"),
+                    vec![
+                        &entry.id,
+                        &entry.path,
+                        &entry.encrypted_data,
+                        &encryption_metadata_json,
+                        &security_level,
+                        &metadata_json,
+                        &entry.tags,
+                        &version,
+                        &entry.owner_id,
+                        &entry.created_at,
+                        &entry.updated_at,
+                        &entry.expires_at,
+                    ],
+                ),
+                crate::Expect::Any => (
+                    format!("{base} ON CONFLICT (path) DO UPDATE SET{update_set}"),
+                    vec![
+                        &entry.id,
+                        &entry.path,
+                        &entry.encrypted_data,
+                        &encryption_metadata_json,
+                        &security_level,
+                        &metadata_json,
+                        &entry.tags,
+                        &version,
+                        &entry.owner_id,
+                        &entry.created_at,
+                        &entry.updated_at,
+                        &entry.expires_at,
+                    ],
+                ),
+                crate::Expect::Owner(_) => (
+                    // The owner key is a compile-time constant, not interpolated input.
+                    format!(
+                        "UPDATE secreton_entries SET{owner_update_set} \
+                         WHERE path = $1 AND metadata->>'{owner}' = $11",
+                        owner = crate::OWNER_TOKEN_KEY
+                    ),
+                    vec![
+                        &entry.path,
+                        &entry.encrypted_data,
+                        &encryption_metadata_json,
+                        &security_level,
+                        &metadata_json,
+                        &entry.tags,
+                        &version,
+                        &entry.owner_id,
+                        &entry.updated_at,
+                        &entry.expires_at,
+                        &token,
+                    ],
+                ),
+            };
+
+        let rows_affected =
+            client
+                .execute(&query, &params)
+                .await
+                .map_err(|e| StorageError::QueryFailed {
+                    message: format!("Failed to compare-and-set secreton entry: {}", e),
+                })?;
+
+        Ok(rows_affected > 0)
+    }
+
+    async fn delete_owned(&self, path: &str, token: &str) -> StorageResult<bool> {
+        let client = self
+            .pool
+            .get()
+            .await
+            .map_err(|e| StorageError::ConnectionFailed {
+                message: format!("Failed to get connection: {}", e),
+            })?;
+
+        let query = format!(
+            "DELETE FROM secreton_entries WHERE path = $1 AND metadata->>'{}' = $2",
+            crate::OWNER_TOKEN_KEY
+        );
+
+        let rows_affected = client
+            .execute(&query, &[&path, &token])
+            .await
+            .map_err(|e| StorageError::QueryFailed {
+                message: format!("Failed to delete owned secreton entry: {}", e),
+            })?;
+
+        Ok(rows_affected > 0)
+    }
+
+    /// Fenced write as a single statement that **locks the lease row**.
+    ///
+    /// The insert is `SELECT ... FROM f`, where `f` is a CTE that selects the lease row only
+    /// while it still carries the token, and `FOR SHARE` makes that select take a row lock.
+    /// The conflict arm repeats the same locked CTE inside its own update condition. Because
+    /// both the fence read and the artifact write are one statement, and the fence read holds
+    /// a lock on the lease row for the statement's duration, a concurrent takeover cannot slip
+    /// between them.
+    ///
+    /// A plain `WHERE EXISTS (SELECT ...)` is **not** enough here, and this is the defect this
+    /// version fixes. `EXISTS` is an unlocked read of the statement's snapshot under READ
+    /// COMMITTED, so it does not serialise with a takeover at all: a takeover transaction that
+    /// has already executed `UPDATE ... SET storage_owner = 'B'` but not yet committed is
+    /// invisible to the snapshot, the `EXISTS` still sees the old `'A'`, and the stale write
+    /// commits — landing *after* the takeover and overwriting the winner's artifact. `FOR
+    /// SHARE` closes that: it blocks on the takeover's row lock, and when the takeover commits
+    /// the lock is re-evaluated against the row's new version, so a token that is no longer
+    /// the lease's owner matches nothing and the write affects zero rows.
+    async fn store_fenced(
+        &self,
+        entry: &SecretEntry,
+        fence: StorageFence<'_>,
+    ) -> StorageResult<bool> {
+        let client = self
+            .pool
+            .get()
+            .await
+            .map_err(|e| StorageError::ConnectionFailed {
+                message: format!("Failed to get connection: {}", e),
+            })?;
+
+        let encryption_metadata_json =
+            serde_json::to_value(&entry.encryption_metadata).map_err(|e| {
+                StorageError::SerializationError {
+                    message: format!("Failed to serialize encryption metadata: {}", e),
+                }
+            })?;
+        let metadata_json = serde_json::to_value(&entry.metadata).map_err(|e| {
+            StorageError::SerializationError {
+                message: format!("Failed to serialize metadata: {}", e),
+            }
+        })?;
+
+        let update_set = r#"
+                encrypted_data = EXCLUDED.encrypted_data,
+                encryption_metadata = EXCLUDED.encryption_metadata,
+                security_level = EXCLUDED.security_level,
+                metadata = EXCLUDED.metadata,
+                tags = EXCLUDED.tags,
+                version = EXCLUDED.version,
+                owner_id = EXCLUDED.owner_id,
+                updated_at = EXCLUDED.updated_at,
+                expires_at = EXCLUDED.expires_at"#;
+
+        // $13 = fence path, $14 = fence owner token. The owner key is a compile-time
+        // constant, never interpolated input. `FOR SHARE` on the fence CTE is the lock that
+        // makes the fence and the write one indivisible step; it is evaluated for both the
+        // insert arm and the conflict arm.
+        let query = format!(
+            "WITH fence AS ( \
+                 SELECT 1 FROM secreton_entries \
+                 WHERE path = $13 AND metadata->>'{owner}' = $14 \
+                 FOR SHARE \
+             ), written AS ( \
+                 INSERT INTO secreton_entries \
+                 (id, path, encrypted_data, encryption_metadata, security_level, metadata, tags, version, owner_id, created_at, updated_at, expires_at) \
+                 SELECT $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12 FROM fence \
+                 ON CONFLICT (path) DO UPDATE SET{update_set} \
+                 WHERE EXISTS (SELECT 1 FROM fence) \
+                 RETURNING 1 \
+             ) \
+             SELECT COUNT(*)::bigint FROM written",
+            owner = crate::OWNER_TOKEN_KEY
+        );
+
+        let security_level = entry.security_level as i32;
+        let version = entry.version as i32;
+
+        let row = client
+            .query_one(
+                &query,
+                &[
+                    &entry.id,
+                    &entry.path,
+                    &entry.encrypted_data,
+                    &encryption_metadata_json,
+                    &security_level,
+                    &metadata_json,
+                    &entry.tags,
+                    &version,
+                    &entry.owner_id,
+                    &entry.created_at,
+                    &entry.updated_at,
+                    &entry.expires_at,
+                    &fence.path,
+                    &fence.token,
+                ],
+            )
+            .await
+            .map_err(|e| StorageError::QueryFailed {
+                message: format!("Failed to fenced-store secreton entry: {}", e),
+            })?;
+
+        let written: i64 = row.get(0);
+        Ok(written > 0)
+    }
+
     async fn count(&self, params: &QueryParams) -> StorageResult<u64> {
         let client = self
             .pool
@@ -399,6 +737,31 @@ impl StorageBackend for PostgresBackend {
             let prefix_pattern = format!("{}%", prefix);
             bind_params.push(Box::new(prefix_pattern));
             param_count += 1;
+        }
+
+        // The same security-level, tag and metadata filters `list()` now applies, so the two
+        // agree on which rows a `QueryParams` selects.
+        if let Some(min_level) = params.security_level {
+            query.push_str(&format!(" AND security_level >= ${}", param_count));
+            bind_params.push(Box::new(min_level as i32));
+            param_count += 1;
+        }
+
+        if !params.tags.is_empty() {
+            query.push_str(&format!(" AND tags @> ${}", param_count));
+            bind_params.push(Box::new(params.tags.clone()));
+            param_count += 1;
+        }
+
+        if !params.metadata_filters.is_empty() {
+            query.push_str(&format!(" AND metadata @> ${}::jsonb", param_count));
+            bind_params.push(Box::new(serde_json::Value::Object(
+                params
+                    .metadata_filters
+                    .iter()
+                    .map(|(k, v)| (k.clone(), serde_json::Value::String(v.clone())))
+                    .collect(),
+            )));
         }
 
         if !params.include_expired {
