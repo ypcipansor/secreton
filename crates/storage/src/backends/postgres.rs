@@ -198,6 +198,40 @@ impl StorageBackend for PostgresBackend {
             param_count += 1;
         }
 
+        // Security-level, tag and metadata filters are part of the shared query contract
+        // (`QueryParams::apply_to`, implemented by memory/file/Redis). They were previously
+        // dropped here, so a caller that filtered on any of them got every row from
+        // PostgreSQL and a filtered set from every other backend — the same query returning
+        // different results depending only on which backend a deployment chose. Applied at
+        // the SQL layer so they compose with `limit`/`offset` rather than truncating before
+        // the filter.
+        if let Some(min_level) = params.security_level {
+            query.push_str(&format!(" AND security_level >= ${}", param_count));
+            bind_params.push(Box::new(min_level as i32));
+            param_count += 1;
+        }
+
+        // `apply_to` requires every requested tag to be present (subset semantics), which is
+        // exactly what the array containment operator checks.
+        if !params.tags.is_empty() {
+            query.push_str(&format!(" AND tags @> ${}", param_count));
+            bind_params.push(Box::new(params.tags.clone()));
+            param_count += 1;
+        }
+
+        // Same subset semantics as `apply_to`: every key/value pair must match.
+        if !params.metadata_filters.is_empty() {
+            query.push_str(&format!(" AND metadata @> ${}::jsonb", param_count));
+            bind_params.push(Box::new(serde_json::Value::Object(
+                params
+                    .metadata_filters
+                    .iter()
+                    .map(|(k, v)| (k.clone(), serde_json::Value::String(v.clone())))
+                    .collect(),
+            )));
+            param_count += 1;
+        }
+
         // Filter out expired entries unless explicitly requested. This matches
         // the behavior of the InMemory and MySQL backends so that callers see
         // a consistent contract across storage implementations.
@@ -235,6 +269,17 @@ impl StorageBackend for PostgresBackend {
         if let Some(limit) = params.limit {
             query.push_str(&format!(" LIMIT ${}", param_count));
             bind_params.push(Box::new(limit as i64));
+            param_count += 1;
+        }
+
+        // `offset` was dropped here, so a caller paginating with it received page one on
+        // PostgreSQL and the requested page on memory/file/Redis. Applied as a SQL `OFFSET`
+        // after the `ORDER BY`, which is the same window `QueryParams::apply_to` computes.
+        if let Some(offset) = params.offset
+            && offset > 0
+        {
+            query.push_str(&format!(" OFFSET ${}", param_count));
+            bind_params.push(Box::new(offset as i64));
         }
 
         let bind_refs: Vec<&(dyn tokio_postgres::types::ToSql + Sync)> = bind_params
@@ -692,6 +737,31 @@ impl StorageBackend for PostgresBackend {
             let prefix_pattern = format!("{}%", prefix);
             bind_params.push(Box::new(prefix_pattern));
             param_count += 1;
+        }
+
+        // The same security-level, tag and metadata filters `list()` now applies, so the two
+        // agree on which rows a `QueryParams` selects.
+        if let Some(min_level) = params.security_level {
+            query.push_str(&format!(" AND security_level >= ${}", param_count));
+            bind_params.push(Box::new(min_level as i32));
+            param_count += 1;
+        }
+
+        if !params.tags.is_empty() {
+            query.push_str(&format!(" AND tags @> ${}", param_count));
+            bind_params.push(Box::new(params.tags.clone()));
+            param_count += 1;
+        }
+
+        if !params.metadata_filters.is_empty() {
+            query.push_str(&format!(" AND metadata @> ${}::jsonb", param_count));
+            bind_params.push(Box::new(serde_json::Value::Object(
+                params
+                    .metadata_filters
+                    .iter()
+                    .map(|(k, v)| (k.clone(), serde_json::Value::String(v.clone())))
+                    .collect(),
+            )));
         }
 
         if !params.include_expired {

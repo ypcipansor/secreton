@@ -72,6 +72,22 @@ pub struct SealService {
     #[cfg(test)]
     fail_next_bootstrap: Arc<AtomicBool>,
 
+    // Serialises the barrier transition (`seal`) against bootstrap credential issuance.
+    //
+    // The two are not independent. `issue_bootstrap_credential_with` awaits storage and the
+    // token service while it mints the root credential, and `seal` clears the in-memory root
+    // key and the pending-bootstrap state. Without a lock the issuance could be in flight
+    // when a seal lands, and the unseal request would then return a live root token for a
+    // vault the operator had just sealed — a credential minted against a barrier that no
+    // longer exists. Holding this across both makes them mutually exclusive: an issuance
+    // either completes before the seal, or, if the seal won, the issuance re-checks the
+    // barrier after acquiring the lock and refuses rather than minting.
+    //
+    // An async mutex, and the only two holders are `seal` and
+    // `issue_bootstrap_credential_with`, both of which take it before touching the barrier
+    // or the crypto key, so the lock order is consistent and there is no deadlock.
+    credential_lock: tokio::sync::Mutex<()>,
+
     // Test-only override of [`INIT_LEASE_TTL_SECS`], so a test can exercise the lease
     // expiry and renewal path in milliseconds rather than the five minutes production
     // uses. `None` means the production constant.
@@ -142,7 +158,7 @@ impl BootstrapShareProof {
     }
 
     fn digest(key: &[u8; 32], share: &Share) -> [u8; 32] {
-        use hmac::{Hmac, Mac};
+        use hmac::{Hmac, KeyInit, Mac};
         let mut mac =
             Hmac::<sha2::Sha256>::new_from_slice(key).expect("HMAC accepts a 32-byte key");
         mac.update(&[share.index]);
@@ -386,6 +402,7 @@ impl SealService {
             init_lock: tokio::sync::Mutex::new(()),
             bootstrap_pending: Arc::new(AtomicBool::new(false)),
             bootstrap_share_proof: Arc::new(RwLock::new(None)),
+            credential_lock: tokio::sync::Mutex::new(()),
             #[cfg(test)]
             fail_next_bootstrap: Arc::new(AtomicBool::new(false)),
             #[cfg(test)]
@@ -1756,6 +1773,31 @@ impl SealService {
         threshold: usize,
         shares_total: usize,
     ) -> Result<UnsealResponse> {
+        // Hold the barrier transition out for the whole issuance. `seal` takes the same
+        // lock, so a seal cannot clear the root key while this awaits the token service and
+        // then let a root token for a sealed vault reach the caller.
+        let _guard = self.credential_lock.lock().await;
+
+        // Re-check the barrier under the lock. The caller (or `unseal`) observed an open
+        // barrier before reaching here, but `seal` may have won the lock in between and
+        // cleared the root key; minting now would hand back a credential for a vault that
+        // is closed. Refusing is the only consistent answer, and it is audited because an
+        // operator who sealed a vault wants to see why the unseal returned nothing.
+        if self.is_sealed().await {
+            self.audit_unseal(
+                LEGACY_ROOT_USERNAME,
+                false,
+                "unseal",
+                "credential issuance refused: the vault was sealed before the credential \
+                 could be minted",
+            )
+            .await;
+            return Err(anyhow!(
+                "Vault was sealed before the root credential could be issued; unseal \
+                 again with its shares."
+            ));
+        }
+
         self.bootstrap_pending.store(true, Ordering::SeqCst);
 
         // The identity the audit record names is the one `init` recorded, not a literal:
@@ -1789,6 +1831,18 @@ impl SealService {
                 // reconstruction the shares just paid for, and the next restart has the
                 // same shares available anyway. The state is reported through
                 // `bootstrap_is_pending` so the failure is recoverable rather than final.
+                //
+                // The detail goes to the log and to the audit record, not to the response.
+                // This path is reached on a storage or crypto fault, and its error text can
+                // carry a backend message ("postgres://…", a file path, a driver string).
+                // `sys/unseal` is a public route, so the caller gets the same generic
+                // string every other 500 does; the operator correlates it through the log
+                // line below. The audit record is internal, so it keeps the real reason.
+                tracing::error!(
+                    error = %e,
+                    "root credential issuance failed after the barrier opened; the vault \
+                     stays open and a share-backed unseal retry can recover the credential"
+                );
                 self.audit_unseal(
                     &actor,
                     false,
@@ -1797,7 +1851,7 @@ impl SealService {
                 )
                 .await;
                 Err(anyhow!(
-                    "Vault is unsealed but the root credential could not be issued ({e}). \
+                    "Vault is unsealed but the root credential could not be issued. \
                      Retry unseal while this process is still running, presenting one of \
                      the shares that opened the vault; the barrier stays open in memory, \
                      so the full threshold is not needed again. A restart discards the \
@@ -1811,7 +1865,13 @@ impl SealService {
     async fn mint_root_credential(&self) -> Result<String> {
         #[cfg(test)]
         if self.fail_next_bootstrap.swap(false, Ordering::SeqCst) {
-            return Err(anyhow!("injected bootstrap credential failure"));
+            // The marker is deliberately internal-looking so the test below can assert it
+            // does not reach the public error: a real storage fault here carries a backend
+            // message, and this is the shape of one.
+            return Err(anyhow!(
+                "injected bootstrap credential failure: \
+                 postgres://secreton:hunter2@db.internal:5432 connection refused"
+            ));
         }
 
         let auth = self.auth.get().ok_or_else(|| {
@@ -1880,6 +1940,11 @@ impl SealService {
 
     /// Seal the vault
     pub async fn seal(&self) {
+        // Serialise against bootstrap credential issuance: a seal that landed while an
+        // issuance was awaiting the token service would leave the caller holding a root
+        // token for a barrier this call just closed. Taking the lock makes the two
+        // mutually exclusive; an issuance that lost the race re-checks and refuses.
+        let _guard = self.credential_lock.lock().await;
         self.crypto.clear_root_key().await;
         self.unseal_buffer.write().await.clear();
         // Sealing discards the root key, so a credential that was never issued cannot be
@@ -2289,6 +2354,115 @@ mod tests {
             afterwards.root_token.is_none(),
             "a settled vault issues no second credential"
         );
+    }
+
+    #[tokio::test]
+    async fn a_failed_issuance_error_reaches_the_caller_without_internal_detail() {
+        // Regression: the failure branch of `issue_bootstrap_credential_with` formatted the
+        // underlying anyhow error into the returned message, and `sys/unseal` is a public
+        // route — it has to work while sealed — so the caller received the storage
+        // backend's raw text. Connection strings and hostnames were reaching an
+        // unauthenticated response body, the one place the repository's rule says they
+        // must not. The detail belongs in the log and the audit record; the caller gets the
+        // actionable, generic instruction.
+        let _env = crate::test_support::without_root_key();
+        let vault = sealed_vault().await;
+
+        let init = vault
+            .seal
+            .init(2, 2, "leak-check-root", &vault.auth, &vault.mfa)
+            .await
+            .expect("init");
+        vault.seal.fail_next_bootstrap.store(true, Ordering::SeqCst);
+
+        vault.seal.unseal(&init.keys[0]).await.expect("share one");
+        let err = vault
+            .seal
+            .unseal(&init.keys[1])
+            .await
+            .expect_err("the injected issuance failure must surface");
+
+        let rendered = format!("{err:#}");
+        for secret in ["hunter2", "db.internal", "postgres://"] {
+            assert!(
+                !rendered.contains(secret),
+                "the public unseal error leaked {secret:?}: {rendered}"
+            );
+        }
+        // It still has to be actionable: the operator must be told the vault is open and
+        // how to recover the credential.
+        assert!(
+            rendered.contains("Retry unseal"),
+            "the error must still tell the operator how to recover: {rendered}"
+        );
+    }
+
+    #[tokio::test]
+    async fn the_bootstrap_token_is_not_mfa_pending_and_this_is_deliberate() {
+        // Devin Review flagged the bootstrap credential as bypassing MFA: the root account
+        // has a TOTP enrollment, yet the token `unseal` returns reaches administrative
+        // operations without a code. That is true, and it is the intended design, not an
+        // oversight — pinning it here so the reasoning is recorded next to the code rather
+        // than only in a review thread.
+        //
+        // Root has no password login at all (`password_login_disabled` is persisted on the
+        // record). The only way to obtain a root credential is to reconstruct the root key
+        // from a threshold of Shamir shares — key material physically held by the operator.
+        // That is a *stronger* factor than a TOTP code, which is generated from a secret the
+        // server itself stores; demanding the TOTP here would gate a share-proof behind a
+        // server-side secret without adding assurance. Gating the token behind the TOTP
+        // would also strand an operator whose TOTP device is lost with a vault they can
+        // open but cannot administer — the exact unreachable-vault failure this branch
+        // already fixed.
+        //
+        // The property that makes the decision safe is that the credential carries no
+        // `mfa_required` claim, so `enforce_mfa_pending` never restricts it: it is a full
+        // root token by construction, and it is the share proof, not an MFA code, that the
+        // design relies on. The TOTP enrollment still exists and `root_totp_uri` is
+        // returned from `init` so the operator can attach an authenticator; it is simply not
+        // the factor that mints the bootstrap credential.
+        let _env = crate::test_support::without_root_key();
+        let vault = sealed_vault().await;
+
+        const ROOT_USERNAME: &str = "mfa-design-root";
+        let init = vault
+            .seal
+            .init(2, 2, ROOT_USERNAME, &vault.auth, &vault.mfa)
+            .await
+            .expect("init");
+        assert!(
+            !init.root_totp_uri.is_empty(),
+            "init must still hand back a TOTP enrolment URI for the operator"
+        );
+        vault.seal.unseal(&init.keys[0]).await.expect("share one");
+        let token = vault
+            .seal
+            .unseal(&init.keys[1])
+            .await
+            .expect("share two")
+            .root_token
+            .expect("root credential");
+
+        let claims = claims_of(&token);
+        assert_eq!(
+            claims["mfa_required"], false,
+            "the bootstrap credential is whole by design; it must not be an mfa_pending token"
+        );
+
+        let user = vault
+            .auth
+            .validate_token(&token)
+            .await
+            .expect("the bootstrap token validates");
+        assert!(
+            !user
+                .metadata
+                .get("mfa_pending")
+                .map(|v| v == "true")
+                .unwrap_or(false),
+            "the middleware must not restrict the share-proof credential to MFA endpoints"
+        );
+        assert!(user.is_admin(), "the credential reaches administrative ops");
     }
 
     #[tokio::test]

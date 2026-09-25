@@ -2400,6 +2400,27 @@ impl AuthenticationService {
             }
         }
 
+        // And prune expired refresh reservations. Each one carries the refresh token's own
+        // `exp`, so it is reclaimable once that passes. Without this sweep the prefix grew
+        // without bound on every backend that persists it: a reservation is deliberately
+        // left in place after a successful exchange (removing it re-opens the replay race
+        // it exists to close), so *every* refresh left a record behind and nothing ever
+        // removed it — not even `delete_expired`, which was only ever asked for the
+        // session and revocation prefixes.
+        match self
+            .storage
+            .delete_expired(Some(REFRESH_RESERVATION_STORAGE_PREFIX.to_string()))
+            .await
+        {
+            Ok(n) if n > 0 => {
+                tracing::info!("Cleaned up {} expired refresh reservations", n);
+            }
+            Ok(_) => {}
+            Err(e) => {
+                tracing::warn!("Failed to clean up expired refresh reservations: {}", e);
+            }
+        }
+
         Ok(deleted_count)
     }
 
@@ -3006,6 +3027,71 @@ mod tests {
         assert!(
             storage.exists("other/path/expired2").await.unwrap(),
             "Unrelated expired entry should remain"
+        );
+    }
+
+    #[tokio::test]
+    async fn cleanup_reclaims_expired_refresh_reservations() {
+        // Regression: a refresh reservation is deliberately left in place after a
+        // successful exchange, so *every* refresh wrote one and nothing ever removed it.
+        // `cleanup_expired_sessions` swept the session and revocation prefixes only, so on
+        // any backend that persists reservations the prefix grew without bound. The
+        // reservation carries the refresh token's own `exp`, which makes it reclaimable
+        // once that passes — the sweep just had to ask for the prefix.
+        use secreton_storage::{EncryptionMetadata, SecretEntry, SecurityLevel};
+        use uuid::Uuid;
+
+        let storage = Arc::new(MemoryBackend::new());
+        let crypto = Arc::new(CryptoService::new(storage.clone()).await.unwrap());
+        let mut config = AuthConfig::default();
+        config.jwt.secret = Some("test_secret".to_string());
+        config.jwt.issuer = "secreton".to_string();
+        config.jwt.audience = "secreton-api".to_string();
+
+        let auth_service = AuthenticationService::new(storage.clone(), crypto, &config)
+            .await
+            .unwrap();
+
+        let reservation = |suffix: &str, expires: chrono::DateTime<chrono::Utc>| {
+            SecretEntry::new(
+                format!("{}{}", REFRESH_RESERVATION_STORAGE_PREFIX, suffix),
+                vec![],
+                EncryptionMetadata::default(),
+                SecurityLevel::Internal,
+                Uuid::new_v4(),
+            )
+            .with_expiration(expires)
+        };
+
+        let expired = format!("{}{}", REFRESH_RESERVATION_STORAGE_PREFIX, "expired");
+        let live = format!("{}{}", REFRESH_RESERVATION_STORAGE_PREFIX, "live");
+        storage
+            .store(&reservation(
+                "expired",
+                chrono::Utc::now() - chrono::Duration::hours(1),
+            ))
+            .await
+            .unwrap();
+        storage
+            .store(&reservation(
+                "live",
+                chrono::Utc::now() + chrono::Duration::hours(1),
+            ))
+            .await
+            .unwrap();
+
+        auth_service
+            .cleanup_expired_sessions()
+            .await
+            .expect("cleanup runs");
+
+        assert!(
+            !storage.exists(&expired).await.unwrap(),
+            "an expired refresh reservation must be reclaimed by session cleanup"
+        );
+        assert!(
+            storage.exists(&live).await.unwrap(),
+            "a reservation whose refresh token is still live must be kept"
         );
     }
 

@@ -251,6 +251,21 @@ kredensial bila membuktikan kepemilikan share — `sys/unseal` adalah route publ
 "pending" saja tidak boleh pernah cukup. Setelah restart, root key hilang dan vault harus
 di-unseal kembali dengan share-nya (`crates/engines/src/services/seal.rs`).
 
+Pesan kegagalan penerbitan itu tidak membawa detail internal. Jalur kegagalannya adalah
+storage atau token service, dan teks errornya dapat memuat connection string, host, atau path
+file; karena `sys/unseal` dapat dipanggil sebelum autentikasi, caller hanya menerima pesan
+generik yang tetap memberi tahu bahwa vault terbuka dan cara memulihkan kredensial. Detail
+lengkapnya masuk ke log dan ke record audit, bukan ke body respons.
+
+Kredensial bootstrap tidak melewati pemeriksaan TOTP, dan itu memang disengaja. Root tidak
+punya login password (`password_login_disabled` tersimpan di record-nya), sehingga satu-satunya
+cara memperoleh kredensial root adalah merekonstruksi root key dari sejumlah share Shamir —
+key material yang dipegang operator secara fisik, faktor yang lebih kuat daripada kode TOTP
+yang dibangkitkan dari secret yang disimpan server itu sendiri. Token yang keluar membawa
+`mfa_required: false` sehingga `enforce_mfa_pending` tidak membatasinya; enrollment TOTP tetap
+dibuat dan `root_totp_uri` dikembalikan `init` supaya operator dapat memasang authenticator,
+tetapi faktor yang menerbitkan kredensial bootstrap adalah bukti share, bukan kode TOTP.
+
 `init` juga bertahap: state parsial di bawah `sys/init_staging` membuat vault tetap
 terlihat belum terinisialisasi sampai semua artefak init tersimpan, dan kegagalan di
 tengah jalan dibersihkan sehingga `init` berikutnya berhasil tanpa restart.

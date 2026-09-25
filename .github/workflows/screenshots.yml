@@ -80,6 +80,10 @@ jobs:
           cache: npm
       - run: npm ci
       - run: npm run browser:install
+      # Tooling preflight only: this proves `playwright-core` resolves and Chromium launches,
+      # so a broken pin or a missing system library fails in seconds instead of after the
+      # wasm build. It deliberately does not exercise the frontend — the capture step below
+      # is the frontend gate, and it is the only step that can see the rendered page.
       - run: npm run screenshots:check
       # The layout rule the capture applies, tested without a browser. It pins the minimum
       # target size and reads `layout.rs` to prove the sign-out control stays above it, so

@@ -1397,4 +1397,244 @@ mod tests {
             "the superseded record must not be counted as well"
         );
     }
+
+    /// A single transaction that mixes operations must apply them as one unit: a store, a
+    /// delete of a *different* record, and a rewrite that repoints a path. Each op is a
+    /// separate script invocation, so the mapping state a later op reads must reflect what
+    /// an earlier op in the same commit wrote — otherwise a rewrite deletes the wrong entry
+    /// or a delete clears a mapping that has already moved on.
+    #[tokio::test]
+    async fn a_mixed_operation_transaction_applies_every_operation_exactly_once() {
+        let Some(url) = redis_url() else {
+            return;
+        };
+        let namespace = format!("it/{}", Uuid::new_v4());
+        let backend = RedisBackend::new(&url).await.expect("connect");
+        let scoped = || QueryParams {
+            path_prefix: Some(namespace.clone()),
+            ..QueryParams::default()
+        };
+
+        // Seed a record the transaction will delete, and one it will rewrite.
+        let doomed_path = format!("{namespace}/mixed/doomed");
+        let doomed = entry_at(&doomed_path, b"doomed");
+        let doomed_id = doomed.id;
+        backend.store(&doomed).await.expect("seed doomed");
+
+        let rewritten_path = format!("{namespace}/mixed/rewritten");
+        let original = entry_at(&rewritten_path, b"original");
+        let original_id = original.id;
+        backend.store(&original).await.expect("seed original");
+
+        let replacement = entry_at(&rewritten_path, b"replacement");
+        let replacement_id = replacement.id;
+        assert_ne!(original_id, replacement_id);
+
+        let fresh_path = format!("{namespace}/mixed/fresh");
+        let fresh = entry_at(&fresh_path, b"fresh");
+        let fresh_id = fresh.id;
+
+        // One commit, three different operations.
+        let mut tx = backend.begin_transaction().await.expect("begin");
+        tx.delete(doomed_id).await.expect("stage delete");
+        tx.store(&replacement).await.expect("stage rewrite");
+        tx.store(&fresh).await.expect("stage store");
+        tx.commit().await.expect("commit mixed");
+
+        // The delete removed exactly its record, mapping included.
+        assert!(
+            backend.get_by_id(doomed_id).await.expect("by id").is_none(),
+            "the deleted entry key must be gone"
+        );
+        assert!(
+            backend
+                .get_by_path(&doomed_path)
+                .await
+                .expect("by path")
+                .is_none(),
+            "the deleted record's path mapping must be gone"
+        );
+
+        // The rewrite repointed the path and dropped the superseded key.
+        let resolved = backend
+            .get_by_path(&rewritten_path)
+            .await
+            .expect("by path")
+            .expect("the rewrite must resolve");
+        assert_eq!(resolved.id, replacement_id);
+        assert!(
+            backend
+                .get_by_id(original_id)
+                .await
+                .expect("by id")
+                .is_none(),
+            "the superseded key must be dropped, not left for an enumeration"
+        );
+
+        // The fresh store is visible and counted.
+        assert_eq!(
+            backend
+                .get_by_path(&fresh_path)
+                .await
+                .expect("by path")
+                .expect("the store must resolve")
+                .id,
+            fresh_id
+        );
+        assert_eq!(
+            backend.count(&scoped()).await.expect("count"),
+            2,
+            "only the replacement and the fresh store remain in this namespace"
+        );
+    }
+
+    /// A rolled-back transaction must leave no trace, whatever mix of operations it staged.
+    /// The staging is in-process, so a rollback must not have touched Redis at all — this
+    /// pins that no operation is applied before commit.
+    #[tokio::test]
+    async fn a_rolled_back_mixed_transaction_leaves_no_trace() {
+        let Some(url) = redis_url() else {
+            return;
+        };
+        let namespace = format!("it/{}", Uuid::new_v4());
+        let backend = RedisBackend::new(&url).await.expect("connect");
+
+        let kept_path = format!("{namespace}/rollback/kept");
+        let kept = entry_at(&kept_path, b"kept");
+        let kept_id = kept.id;
+        backend.store(&kept).await.expect("seed kept");
+
+        let staged_path = format!("{namespace}/rollback/staged");
+        let staged = entry_at(&staged_path, b"staged");
+        let staged_id = staged.id;
+
+        let mut tx = backend.begin_transaction().await.expect("begin");
+        tx.store(&staged).await.expect("stage store");
+        tx.delete(kept_id).await.expect("stage delete");
+        tx.rollback().await.expect("rollback");
+
+        assert!(
+            backend
+                .get_by_path(&staged_path)
+                .await
+                .expect("by path")
+                .is_none(),
+            "a rolled-back store must not reach Redis"
+        );
+        assert!(
+            backend.exists(&kept_path).await.expect("exists"),
+            "a rolled-back delete must not remove the record"
+        );
+        assert_eq!(
+            backend
+                .get_by_path(&kept_path)
+                .await
+                .expect("by path")
+                .expect("kept record")
+                .id,
+            kept_id
+        );
+        assert!(
+            backend.get_by_id(staged_id).await.expect("by id").is_none(),
+            "the staged entry key must never have been written"
+        );
+    }
+
+    /// The last write to a path within one commit wins, and only the winner is reachable.
+    /// A transaction may stage two rewrites of the same path; the mapping must end up
+    /// pointing at the second, with neither the seed nor the intermediate record left for
+    /// an enumeration to find.
+    #[tokio::test]
+    async fn the_last_write_to_a_path_in_one_transaction_wins() {
+        let Some(url) = redis_url() else {
+            return;
+        };
+        let namespace = format!("it/{}", Uuid::new_v4());
+        let path = format!("{namespace}/ordering/winner");
+        let backend = RedisBackend::new(&url).await.expect("connect");
+        let scoped = QueryParams {
+            path_prefix: Some(namespace.clone()),
+            ..QueryParams::default()
+        };
+
+        let seed = entry_at(&path, b"seed");
+        let seed_id = seed.id;
+        backend.store(&seed).await.expect("seed");
+
+        let first = entry_at(&path, b"first");
+        let first_id = first.id;
+        let second = entry_at(&path, b"second");
+        let second_id = second.id;
+        assert_ne!(seed_id, first_id);
+        assert_ne!(first_id, second_id);
+
+        let mut tx = backend.begin_transaction().await.expect("begin");
+        tx.store(&first).await.expect("stage first rewrite");
+        tx.store(&second).await.expect("stage second rewrite");
+        tx.commit().await.expect("commit");
+
+        assert_eq!(
+            backend
+                .get_by_path(&path)
+                .await
+                .expect("by path")
+                .expect("the path must resolve")
+                .id,
+            second_id,
+            "the path must resolve to the last write in the commit"
+        );
+        for superseded in [seed_id, first_id] {
+            assert!(
+                backend
+                    .get_by_id(superseded)
+                    .await
+                    .expect("by id")
+                    .is_none(),
+                "a superseded record must be dropped so it cannot surface in an enumeration"
+            );
+        }
+        assert_eq!(
+            backend.count(&scoped).await.expect("count"),
+            1,
+            "only the winning record may remain in this namespace"
+        );
+    }
+
+    /// Deleting an id that does not exist is a no-op that reports success and leaves every
+    /// live mapping untouched. A commit that errored, or that cleared a mapping it did not
+    /// own, would make a caller's cleanup of an already-removed record destructive.
+    #[tokio::test]
+    async fn deleting_an_unknown_id_is_a_harmless_no_op() {
+        let Some(url) = redis_url() else {
+            return;
+        };
+        let namespace = format!("it/{}", Uuid::new_v4());
+        let survivor_path = format!("{namespace}/noop/survivor");
+        let survivor = entry_at(&survivor_path, b"survivor");
+        let survivor_id = survivor.id;
+        let backend = RedisBackend::new(&url).await.expect("connect");
+        backend.store(&survivor).await.expect("seed");
+
+        let mut tx = backend.begin_transaction().await.expect("begin");
+        tx.delete(Uuid::new_v4())
+            .await
+            .expect("stage unknown delete");
+        tx.commit()
+            .await
+            .expect("deleting an unknown id must not fail the commit");
+
+        assert!(
+            backend.exists(&survivor_path).await.expect("exists"),
+            "an unrelated live record must be untouched"
+        );
+        assert_eq!(
+            backend
+                .get_by_path(&survivor_path)
+                .await
+                .expect("by path")
+                .expect("survivor")
+                .id,
+            survivor_id
+        );
+    }
 }
