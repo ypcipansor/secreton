@@ -2383,17 +2383,21 @@ mod tests {
             .expect_err("the injected issuance failure must surface");
 
         let rendered = format!("{err:#}");
-        for secret in ["hunter2", "db.internal", "postgres://"] {
+        // The markers are named by index: a panic message that interpolated one would put
+        // it in a log, which is the very thing the assertion proves did not happen. The
+        // rendered body is deliberately not printed either, for the same reason.
+        let forbidden = ["hunter2", "db.internal", "postgres://"];
+        for (index, marker) in forbidden.iter().enumerate() {
             assert!(
-                !rendered.contains(secret),
-                "the public unseal error leaked {secret:?}: {rendered}"
+                !rendered.contains(marker),
+                "the public unseal error leaked the marker at index {index}"
             );
         }
         // It still has to be actionable: the operator must be told the vault is open and
         // how to recover the credential.
         assert!(
             rendered.contains("Retry unseal"),
-            "the error must still tell the operator how to recover: {rendered}"
+            "the error must still tell the operator how to recover"
         );
     }
 
